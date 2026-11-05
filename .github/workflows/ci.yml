@@ -32,7 +32,8 @@ jobs:
       cancel-in-progress: false
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+      # Secrets 或 Variables 都可以
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
       WORKER_NAME: ${{ vars.WORKER_NAME }}
       GITHUB_APP_ID: ${{ vars.GITHUB_APP_ID }}
       GITHUB_APP_SLUG: ${{ vars.GITHUB_APP_SLUG }}
