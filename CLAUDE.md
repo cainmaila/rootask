@@ -29,7 +29,7 @@
 
 - `worker/`：Cloudflare Worker（無狀態）。GitHub 登入、加密 cookie、`/api/gh/*` 代理、webhook。
 - `web/`：React + Vite PWA，由 Worker 的 static assets 服務，同網域。
-- 部署：`npm run deploy`（wrangler）。每個部署自己的設定在本機 `wrangler.toml`（不進 git），範本是 `wrangler.example.toml`；不要把個人部署的值寫進範本。
+- 部署：`npm run deploy`（wrangler）。每個部署自己的設定在不進 git 的 `local/`（`local/wrangler.toml`、`local/.dev.vars`），範本在 `local.example/`；不要把個人部署的值寫進範本。wrangler 指令一律加 `-c local/wrangler.toml`，或用 npm scripts。
 
 ## 驗證
 

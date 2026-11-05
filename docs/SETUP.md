@@ -6,13 +6,15 @@
 
 ```bash
 npm install
-npx wrangler login          # 開瀏覽器登入 Cloudflare
+npx wrangler login          # 開瀏覽器登入 Cloudflare（只有這個不用指定設定檔）
 npm run deploy
 ```
 
-第一次執行會自動從 `wrangler.example.toml` 建立你自己的 `wrangler.toml`（不進 git）。
-想改網址名稱就改這個檔案的 `name`（例如 `name = "cain-tasks"`），再部署一次。
-**之後所有部署相關的修改都只改 `wrangler.toml`**，`wrangler.example.toml` 是給所有人的範本，不要動，這樣 `git pull` 更新程式時永遠不會衝突。
+第一次執行會自動從範本 `local.example/` 建立你自己的 **`local/`** 資料夾（不進 git），裡面是 `wrangler.toml` 和 `.dev.vars`。
+想改網址名稱就改 `local/wrangler.toml` 的 `name`（例如 `name = "cain-tasks"`），再部署一次。
+
+**所有個人部署的設定都只放在 `local/`**，`local.example/` 是給所有人的範本，不要動，這樣 `git pull` 更新程式時永遠不會衝突。
+（請一律用 `npm run deploy`、`npm run secret` 這些指令，它們會自動指向 `local/wrangler.toml`。）
 
 部署完成會顯示網址，例如 `https://rootask.<你的子網域>.workers.dev`，以下稱為 **APP_URL**。
 （此時還不能登入，因為還沒設定 GitHub App。）
@@ -55,10 +57,10 @@ npm run deploy
 App 代稱不用設定，Worker 會自動查詢。設定機密：
 
 ```bash
-npx wrangler secret put GITHUB_CLIENT_ID
-npx wrangler secret put GITHUB_CLIENT_SECRET
-npx wrangler secret put SESSION_SECRET     # 任意 32 字元以上亂數，例如 openssl rand -hex 32
-npx wrangler secret put WEBHOOK_SECRET     # 與 App 設定的 webhook secret 相同
+npm run secret GITHUB_CLIENT_ID
+npm run secret GITHUB_CLIENT_SECRET
+npm run secret SESSION_SECRET     # 任意 32 字元以上亂數，例如 openssl rand -hex 32
+npm run secret WEBHOOK_SECRET     # 與 App 設定的 webhook secret 相同
 npm run deploy
 ```
 
@@ -76,10 +78,10 @@ npm run deploy
 自動化要以 App 自己的身分修改 issue，所以需要 App 的私鑰。不設定的話登入和一般操作照常可用，只是沒有自動化。
 
 1. App 設定頁 General 最下方 **Private keys** → **Generate a private key**，會下載一個 `.pem` 檔。
-2. 同一頁上方的 **App ID**（純數字）填進你自己的 `wrangler.toml` 的 `GITHUB_APP_ID`。
+2. 同一頁上方的 **App ID**（純數字）填進 `local/wrangler.toml` 的 `GITHUB_APP_ID`。
 3. 把私鑰設成 secret（直接從檔案讀入，避免複製貼上出錯）：
    ```bash
-   npx wrangler secret put GITHUB_APP_PRIVATE_KEY < ~/Downloads/你的app名稱.*.private-key.pem
+   npm run secret GITHUB_APP_PRIVATE_KEY < ~/Downloads/你的app名稱.*.private-key.pem
    ```
 4. 確認 App 設定頁 **Permissions & events → Subscribe to events** 有勾 `Issues` 和 `Sub issues`，Webhook 為 Active。
 5. `npm run deploy`。
@@ -97,8 +99,18 @@ npm run deploy
 ## 本機開發
 
 ```bash
-cp .dev.vars.example .dev.vars   # 填入同樣的機密
+# 在 local/.dev.vars 填入同樣的機密（第一次執行 npm run dev 時會自動建立）
 npm run dev                      # 建置前端並用 wrangler dev 在 http://localhost:8787 執行
 ```
 
 本機登入需要在 GitHub App 的 Callback URL 再加一條 `http://localhost:8787/auth/callback`（GitHub App 可以設定多個 callback）。
+
+## 從舊版更新（根目錄有 wrangler.toml 的人）
+
+舊版的個人設定放在根目錄的 `wrangler.toml`。更新前先把它搬進 `local/`，修改就不會遺失：
+
+```bash
+mkdir -p local && mv wrangler.toml local/
+git pull
+npm run deploy      # 會自動修正 local/wrangler.toml 裡的相對路徑
+```

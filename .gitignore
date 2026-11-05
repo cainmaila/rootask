@@ -5,4 +5,7 @@ dev-dist/
 .dev.vars
 *.log
 .DS_Store
-wrangler.toml
+# 個人部署設定（範本在 local.example/）
+local/
+# 舊版放在根目錄的個人設定
+/wrangler.toml

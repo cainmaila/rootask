@@ -5,14 +5,18 @@
   "type": "module",
   "description": "以 GitHub repo 為完整後端的任務管理 PWA",
   "scripts": {
-    "dev": "npm run build && wrangler dev",
+    "dev": "npm run build && wrangler dev -c local/wrangler.toml",
     "dev:web": "vite",
     "build": "vite build",
     "typecheck": "tsc -p web/tsconfig.json --noEmit && tsc -p worker/tsconfig.json --noEmit",
-    "deploy": "npm run build && wrangler deploy",
+    "deploy": "npm run build && wrangler deploy -c local/wrangler.toml",
     "test": "vitest run",
     "predev": "node scripts/ensure-config.mjs",
-    "predeploy": "node scripts/ensure-config.mjs"
+    "predeploy": "node scripts/ensure-config.mjs",
+    "secret": "wrangler secret put -c local/wrangler.toml",
+    "secret:list": "wrangler secret list -c local/wrangler.toml",
+    "presecret": "node scripts/ensure-config.mjs",
+    "presecret:list": "node scripts/ensure-config.mjs"
   },
   "dependencies": {
     "react": "^18.3.1",

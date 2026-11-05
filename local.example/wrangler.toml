@@ -1,15 +1,16 @@
 # Rootask 部署設定範本。
-# 第一次執行 `npm run dev` 或 `npm run deploy` 時會自動複製成 wrangler.toml（不進 git），
-# 之後只改你自己的 wrangler.toml，這個範本不用動。
+# 第一次執行 npm run dev / deploy / secret 時會自動複製到 local/（不進 git），
+# 之後只改 local/wrangler.toml，這個範本不用動。
+# 注意：下面的路徑是相對於這個檔案所在的資料夾，所以前面有 ../
 
 # Worker 名稱，會成為網址的一部分：https://<name>.<你的子網域>.workers.dev
 name = "rootask"
-main = "worker/src/index.ts"
+main = "../worker/src/index.ts"
 compatibility_date = "2024-10-22"
 
 # 前端（web/dist）與 Worker 同網域部署；/api 與 /auth 先交給 Worker 處理
 [assets]
-directory = "./web/dist"
+directory = "../web/dist"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
 run_worker_first = ["/api/*", "/auth/*"]
