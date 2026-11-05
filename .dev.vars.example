@@ -1,0 +1,5 @@
+# 複製成 .dev.vars 給 `wrangler dev` 本機使用（.dev.vars 不會進 git）
+GITHUB_CLIENT_ID=Iv23xxxxxxxxxxxxxxxx
+GITHUB_CLIENT_SECRET=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+SESSION_SECRET=換成一串至少32字元的亂數
+WEBHOOK_SECRET=與GitHubApp設定相同的字串
