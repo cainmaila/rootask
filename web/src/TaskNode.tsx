@@ -72,9 +72,14 @@ export function TaskNode({ n, ctx, expanded, toggle, selected, select, drag }: P
           drag.setDragging(null);
           drag.setOver(null);
         }}
+        // dragenter 和 dragover 都要 preventDefault 才算放置目標，否則放開時不會觸發 drop（#42 實測）
+        onDragEnter={(e) => {
+          if (drag.dragging !== null && drag.dragging !== n && drag.canDrop(n)) e.preventDefault();
+        }}
         onDragOver={(e) => {
           if (drag.dragging === null || drag.dragging === n || !drag.canDrop(n)) return;
           e.preventDefault();
+          e.dataTransfer.dropEffect = "move";
           const r = e.currentTarget.getBoundingClientRect();
           const position = e.clientY < r.top + r.height / 2 ? "before" : "after";
           if (drag.over?.n !== n || drag.over.position !== position) drag.setOver({ n, position });
