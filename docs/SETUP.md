@@ -67,6 +67,21 @@ npm run deploy
 
 > 登入出現「The client_id and/or client_secret passed are incorrect」＝前兩個值不對，重新產生 secret 再設一次即可（secret 設定後立即生效，不用重新部署）。
 
+## 3-1. 啟用 webhook 自動化（狀態修正、轉換規則、父任務自動完成）
+
+自動化要以 App 自己的身分修改 issue，所以需要 App 的私鑰。不設定的話登入和一般操作照常可用，只是沒有自動化。
+
+1. App 設定頁 General 最下方 **Private keys** → **Generate a private key**，會下載一個 `.pem` 檔。
+2. 同一頁上方的 **App ID**（純數字）填進 `wrangler.toml` 的 `GITHUB_APP_ID`。
+3. 把私鑰設成 secret（直接從檔案讀入，避免複製貼上出錯）：
+   ```bash
+   npx wrangler secret put GITHUB_APP_PRIVATE_KEY < ~/Downloads/你的app名稱.*.private-key.pem
+   ```
+4. 確認 App 設定頁 **Permissions & events → Subscribe to events** 有勾 `Issues` 和 `Sub issues`，Webhook 為 Active。
+5. `npm run deploy`。
+
+> 私鑰檔下載後請妥善保管或刪除，它等同 App 的密碼。
+
 ## 4. 安裝到測試 repo、開始使用
 
 1. 打開 APP_URL → 「使用 GitHub 帳號登入」。

@@ -12,9 +12,12 @@ run_worker_first = ["/api/*", "/auth/*"]
 [vars]
 # GitHub App 的網址代稱（https://github.com/apps/<slug>），用來產生「安裝到 repo」連結
 GITHUB_APP_SLUG = "rootask"
+# GitHub App 頁面上純數字的 App ID（webhook 自動化需要，不是機密）
+GITHUB_APP_ID = ""
 
 # 以下為機密，請用 `wrangler secret put <名稱>` 設定，不要寫在這裡：
 #   GITHUB_CLIENT_ID
 #   GITHUB_CLIENT_SECRET
 #   SESSION_SECRET   （任意 32 字元以上的亂數字串）
 #   WEBHOOK_SECRET   （與 GitHub App 設定的 webhook secret 相同）
+#   GITHUB_APP_PRIVATE_KEY （GitHub App 的私鑰 .pem 全文；webhook 自動化需要）

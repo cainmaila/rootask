@@ -1,25 +1,17 @@
 import YAML from "yaml";
 import { ApiError, gh } from "./api";
 
-export type StatusCategory = "todo" | "active" | "done" | "cancelled";
+import {
+  DEFAULT_CONFIG,
+  STATUS_PREFIX,
+  validateConfig,
+  type ProjectConfig,
+  type StatusCategory,
+} from "../../shared/rules";
 
-export interface StatusDef {
-  id: string;
-  name: string;
-  category: StatusCategory;
-  color?: string;
-}
-
-export interface ProjectConfig {
-  version: 1;
-  statuses: StatusDef[];
-  /** 小檔與大檔的分界（MB），第二階段附件使用 */
-  attachment_threshold_mb?: number;
-  auto_complete_parent?: boolean;
-}
+export * from "../../shared/rules";
 
 export const CONFIG_PATH = ".taskapp/config.yml";
-export const STATUS_PREFIX = "status:";
 
 export const CATEGORY_LABEL: Record<StatusCategory, string> = {
   todo: "未開始",
@@ -33,19 +25,6 @@ const CATEGORY_COLOR: Record<StatusCategory, string> = {
   active: "fbca04",
   done: "0e8a16",
   cancelled: "cfd3d7",
-};
-
-export const DEFAULT_CONFIG: ProjectConfig = {
-  version: 1,
-  statuses: [
-    { id: "todo", name: "待處理", category: "todo" },
-    { id: "doing", name: "進行中", category: "active" },
-    { id: "review", name: "待審核", category: "active" },
-    { id: "done", name: "完成", category: "done" },
-    { id: "dropped", name: "放棄", category: "cancelled" },
-  ],
-  attachment_threshold_mb: 10,
-  auto_complete_parent: false,
 };
 
 export interface LoadedConfig {
@@ -65,21 +44,6 @@ function encodeBase64Utf8(s: string): string {
   let bin = "";
   for (const b of bytes) bin += String.fromCharCode(b);
   return btoa(bin);
-}
-
-export function validateConfig(c: unknown): ProjectConfig {
-  const cfg = c as Partial<ProjectConfig>;
-  if (!cfg || !Array.isArray(cfg.statuses) || cfg.statuses.length === 0) {
-    throw new Error("設定檔缺少 statuses");
-  }
-  const ids = new Set<string>();
-  for (const s of cfg.statuses) {
-    if (!s.id || !/^[a-z0-9_-]+$/.test(s.id)) throw new Error(`狀態 id 不合法：${s.id}`);
-    if (ids.has(s.id)) throw new Error(`狀態 id 重複：${s.id}`);
-    if (!["todo", "active", "done", "cancelled"].includes(s.category)) throw new Error(`類別不合法：${s.category}`);
-    ids.add(s.id);
-  }
-  return { ...DEFAULT_CONFIG, ...cfg, version: 1 } as ProjectConfig;
 }
 
 export async function loadConfig(owner: string, repo: string): Promise<LoadedConfig> {

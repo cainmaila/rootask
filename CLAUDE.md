@@ -33,4 +33,5 @@
 
 ## 驗證
 
-改完程式至少跑：`npm run typecheck && npm run build`。
+改完程式至少跑：`npm run typecheck && npm test && npm run build`。
+自動化邏輯的測試用 `tests/fake-github.ts`（記憶體中的假 GitHub），新增規則時請一併加測試。

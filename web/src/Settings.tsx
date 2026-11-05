@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { CATEGORY_LABEL, saveConfig, validateConfig, type StatusCategory, type StatusDef } from "./config";
+import { CATEGORY_LABEL, saveConfig, validateConfig, type StatusCategory, type StatusDef, type Transition } from "./config";
 import type { ProjectCtx } from "./ProjectView";
 import { setStatus, statusOf } from "./tasks";
 
@@ -9,6 +9,8 @@ export function Settings({ ctx, canAdmin }: { ctx: ProjectCtx; canAdmin: boolean
   const { owner, repo, cfg, tree } = ctx;
   const [rows, setRows] = useState<StatusDef[]>(cfg.config.statuses.map((s) => ({ ...s })));
   const [newId, setNewId] = useState("");
+  const [autoParent, setAutoParent] = useState(!!cfg.config.auto_complete_parent);
+  const [rules, setRules] = useState<Transition[]>((cfg.config.transitions ?? []).map((t) => ({ ...t })));
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
@@ -33,7 +35,14 @@ export function Settings({ ctx, canAdmin }: { ctx: ProjectCtx; canAdmin: boolean
     setBusy(true);
     setMsg(null);
     try {
-      const next = validateConfig({ ...cfg.config, statuses: rows });
+      const ids = new Set(rows.map((r) => r.id));
+      const next = validateConfig({
+        ...cfg.config,
+        statuses: rows,
+        auto_complete_parent: autoParent,
+        // 指到已刪除狀態的規則一併拿掉
+        transitions: rules.filter((t) => (t.from === "*" || ids.has(t.from)) && ids.has(t.to)),
+      });
       const removed = cfg.config.statuses.filter((s) => !rows.some((r) => r.id === s.id));
       const fallback = next.statuses.find((s) => s.category === "todo") ?? next.statuses[0];
 
@@ -136,6 +145,78 @@ export function Settings({ ctx, canAdmin }: { ctx: ProjectCtx; canAdmin: boolean
         <input value={newId} onChange={(e) => setNewId(e.target.value)} placeholder="新狀態 id（例如 design）" />
         <button className="btn">加入</button>
       </form>
+      <h3>轉換規則</h3>
+      <p className="muted small">
+        限制誰能把任務從某個狀態改到另一個狀態。沒寫規則的轉換都允許。「誰可以」填 <code>none</code>（禁止），
+        或用逗號列出權限等級（<code>write</code>、<code>maintain</code>、<code>admin</code>，含以上）或帳號（<code>@cain</code>）。
+      </p>
+      <table className="status-table">
+        <thead>
+          <tr>
+            <th>從</th>
+            <th>到</th>
+            <th>誰可以</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {rules.map((t, i) => (
+            <tr key={i}>
+              <td>
+                <select value={t.from} onChange={(e) => setRules((r) => r.map((x, j) => (j === i ? { ...x, from: e.target.value } : x)))}>
+                  <option value="*">（任何狀態）</option>
+                  {rows.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </select>
+              </td>
+              <td>
+                <select value={t.to} onChange={(e) => setRules((r) => r.map((x, j) => (j === i ? { ...x, to: e.target.value } : x)))}>
+                  {rows.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </select>
+              </td>
+              <td>
+                <input
+                  defaultValue={t.allowed === "none" ? "none" : t.allowed.join(", ")}
+                  onBlur={(e) => {
+                    const v = e.target.value.trim();
+                    const allowed: Transition["allowed"] =
+                      v === "" || v === "none" ? "none" : v.split(",").map((x) => x.trim()).filter(Boolean);
+                    setRules((r) => r.map((x, j) => (j === i ? { ...x, allowed } : x)));
+                  }}
+                />
+              </td>
+              <td>
+                <button className="icon" title="刪除" onClick={() => setRules((r) => r.filter((_, j) => j !== i))}>
+                  🗑
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <button
+        className="btn small"
+        onClick={() => setRules((r) => [...r, { from: "*", to: rows.find((s) => s.category === "done")?.id ?? rows[0].id, allowed: ["maintain"] }])}
+      >
+        ＋ 新增規則
+      </button>
+
+      <h3>自動化</h3>
+      <label className="check">
+        <input type="checkbox" checked={autoParent} onChange={(e) => setAutoParent(e.target.checked)} />
+        子任務全部完成時，自動推進父任務
+      </label>
+      <p className="muted small">
+        若有規則限制「從某狀態改成完成」需要特定權限，父任務會停在那個狀態等人核准，不會直接完成。子任務被重開時，自動推進的父任務會退回。
+      </p>
+
       <div className="actions">
         <button className="btn primary" disabled={busy} onClick={save}>
           {busy ? "儲存中…" : "儲存設定"}

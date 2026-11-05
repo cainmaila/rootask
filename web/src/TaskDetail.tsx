@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { transitionAllowed } from "./config";
 import type { ProjectCtx } from "./ProjectView";
 import {
   addComment,
@@ -85,11 +86,14 @@ export function TaskDetail({ n, ctx, close }: { n: number; ctx: ProjectCtx; clos
             void run(() => setStatus(owner, repo, task, s));
           }}
         >
-          {cfg.config.statuses.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.name}
-            </option>
-          ))}
+          {cfg.config.statuses
+            // 轉換規則不允許的選項直接不顯示（伺服器端也會再檢查一次）
+            .filter((s) => transitionAllowed(cfg.config, status.id, s.id, ctx.permission, ctx.me))
+            .map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
         </select>
       </label>
 

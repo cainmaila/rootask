@@ -8,6 +8,8 @@ import {
   readCookie,
   sealSession,
 } from "./session";
+import { onIssues, onSubIssues, type IssuesEvent, type SubIssuesEvent } from "./automation";
+import { GhClient, installationToken } from "./github-app";
 
 export interface Env {
   ASSETS: Fetcher;
@@ -16,13 +18,16 @@ export interface Env {
   GITHUB_CLIENT_SECRET: string;
   SESSION_SECRET: string;
   WEBHOOK_SECRET: string;
+  /** webhook 自動化以 App 身分操作時需要（未設定時自動化不啟用） */
+  GITHUB_APP_ID?: string;
+  GITHUB_APP_PRIVATE_KEY?: string;
 }
 
 const SESSION_MAX_AGE = 60 * 60 * 24 * 180; // refresh token 有效約 6 個月
 const GH_API = "https://api.github.com";
 
 export default {
-  async fetch(req: Request, env: Env): Promise<Response> {
+  async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(req.url);
     const p = url.pathname;
 
@@ -30,7 +35,7 @@ export default {
     if (p === "/auth/callback") return callback(req, url, env);
     if (p === "/auth/logout") return logout();
     if (p === "/api/session") return sessionInfo(req, env);
-    if (p === "/api/webhook" && req.method === "POST") return webhook(req, env);
+    if (p === "/api/webhook" && req.method === "POST") return webhook(req, env, ctx);
     if (p.startsWith("/api/gh/")) return proxy(req, url, env);
 
     return env.ASSETS.fetch(req);
@@ -185,7 +190,7 @@ async function proxy(req: Request, url: URL, env: Env): Promise<Response> {
 
 // ---------- Webhook（第二階段：狀態修正、轉換規則、父任務自動完成） ----------
 
-async function webhook(req: Request, env: Env): Promise<Response> {
+async function webhook(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const body = await req.text();
   const sig = req.headers.get("X-Hub-Signature-256") ?? "";
   const k = await crypto.subtle.importKey(
@@ -199,8 +204,26 @@ async function webhook(req: Request, env: Env): Promise<Response> {
   const expected = "sha256=" + [...mac].map((b) => b.toString(16).padStart(2, "0")).join("");
   if (!timingSafeEqual(sig, expected)) return new Response("bad signature", { status: 401 });
 
-  // TODO(第二階段)：依 X-GitHub-Event 處理 issues / sub_issues 事件
-  return new Response(null, { status: 204 });
+  const event = req.headers.get("X-GitHub-Event");
+  const payload = JSON.parse(body) as { sender?: { type?: string }; installation?: { id: number } };
+  // bot（包含我們自己）觸發的事件一律略過，避免自己改、自己再被觸發的迴圈
+  if (payload.sender?.type === "Bot") return new Response(null, { status: 204 });
+  if (event !== "issues" && event !== "sub_issues") return new Response(null, { status: 204 });
+  if (!env.GITHUB_APP_ID || !env.GITHUB_APP_PRIVATE_KEY || !payload.installation) {
+    return new Response("automation disabled", { status: 202 });
+  }
+  const appEnv = { GITHUB_APP_ID: env.GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY: env.GITHUB_APP_PRIVATE_KEY };
+  const installationId = payload.installation.id;
+
+  // GitHub 要求 10 秒內回應，處理放到背景
+  ctx.waitUntil(
+    (async () => {
+      const gh = new GhClient(await installationToken(appEnv, installationId));
+      if (event === "issues") await onIssues(gh, payload as unknown as IssuesEvent);
+      else await onSubIssues(gh, payload as unknown as SubIssuesEvent);
+    })().catch((e) => console.error("webhook 自動化失敗", event, e)),
+  );
+  return new Response(null, { status: 202 });
 }
 
 function timingSafeEqual(a: string, b: string): boolean {

@@ -1,5 +1,5 @@
 import { gh, graphql } from "./api";
-import { STATUS_PREFIX, type ProjectConfig, type StatusDef } from "./config";
+import { STATUS_PREFIX, statusFromLabels, type ProjectConfig, type StatusDef } from "./config";
 
 /** GitHub 原生 sub-issues 的巢狀上限 */
 export const MAX_DEPTH = 8;
@@ -144,12 +144,7 @@ export function moveBlockReason(tree: TaskTree, n: number, newParent: number | n
 // ---------- 狀態 ----------
 
 export function statusOf(task: Task, config: ProjectConfig): StatusDef {
-  const ids = task.labels.filter((l) => l.startsWith(STATUS_PREFIX)).map((l) => l.slice(STATUS_PREFIX.length));
-  const found = config.statuses.find((s) => ids.includes(s.id));
-  if (found) return found;
-  // 沒有狀態標籤時依 GitHub 原生狀態推斷
-  const want = task.state === "CLOSED" ? (task.stateReason === "NOT_PLANNED" ? "cancelled" : "done") : "todo";
-  return config.statuses.find((s) => s.category === want) ?? config.statuses[0];
+  return statusFromLabels(task.labels, task.state === "CLOSED" ? "closed" : "open", task.stateReason, config);
 }
 
 // ---------- 寫入操作（REST） ----------

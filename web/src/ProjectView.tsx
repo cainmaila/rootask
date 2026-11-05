@@ -3,6 +3,7 @@ import { loadConfig, saveConfig, type LoadedConfig } from "./config";
 import { Settings } from "./Settings";
 import { TaskDetail } from "./TaskDetail";
 import { TaskNode } from "./TaskNode";
+import { gh } from "./api";
 import { createTask, listAssignable, loadTree, myPermission, type Person, type TaskTree } from "./tasks";
 
 export interface ProjectCtx {
@@ -12,6 +13,8 @@ export interface ProjectCtx {
   tree: TaskTree;
   people: Person[];
   permission: string;
+  /** 目前登入者的 GitHub 帳號 */
+  me: string;
   reload: () => Promise<void>;
 }
 
@@ -26,13 +29,14 @@ export function ProjectView({ owner, repo }: { owner: string; repo: string }) {
 
   const reload = useCallback(async () => {
     try {
-      const [cfg, tree, people, permission] = await Promise.all([
+      const [cfg, tree, people, permission, user] = await Promise.all([
         loadConfig(owner, repo),
         loadTree(owner, repo),
         listAssignable(owner, repo),
         myPermission(owner, repo),
+        gh<{ login: string }>("/user"),
       ]);
-      setCtx({ owner, repo, cfg, tree, people, permission });
+      setCtx({ owner, repo, cfg, tree, people, permission, me: user.login });
       setError(null);
     } catch (e) {
       setError((e as Error).message);

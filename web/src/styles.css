@@ -180,3 +180,6 @@ textarea { resize: vertical; }
 .status-table th { text-align: left; font-size: 12px; color: var(--muted); font-weight: 500; padding: 4px; }
 .status-table td { padding: 4px; border-top: 1px solid var(--line); }
 .actions { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
+.check { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+.check input { width: auto; }
+.settings h3 { margin-top: 24px; }
