@@ -58,6 +58,15 @@ npx wrangler secret put WEBHOOK_SECRET     # 與 App 設定的 webhook secret �
 npm run deploy
 ```
 
+| 名稱 | 值從哪來 |
+|---|---|
+| `GITHUB_CLIENT_ID` | **GitHub 產生**：App 設定頁 General 的 Client ID（`Iv23` 開頭，不是純數字的 App ID） |
+| `GITHUB_CLIENT_SECRET` | **GitHub 產生**：App 設定頁 General → Client secrets → Generate a new client secret。**不能自己打** |
+| `SESSION_SECRET` | 自己決定，只存在 Worker |
+| `WEBHOOK_SECRET` | 自己決定，但 App 設定頁的 Webhook secret 必須填同一串 |
+
+> 登入出現「The client_id and/or client_secret passed are incorrect」＝前兩個值不對，重新產生 secret 再設一次即可（secret 設定後立即生效，不用重新部署）。
+
 ## 4. 安裝到測試 repo、開始使用
 
 1. 打開 APP_URL → 「使用 GitHub 帳號登入」。
