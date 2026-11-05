@@ -44,7 +44,11 @@ npm run deploy
 
 **Subscribe to events**：勾 `Issues`、`Issue comment`、`Sub issues`（第二階段自動化會用到）。
 
-**Where can this GitHub App be installed?**：先選 *Only on this account*。
+**Where can this GitHub App be installed?**：選 **Any account**（公開）。
+
+> ⚠️ 選 *Only on this account*（私有）的話，**只有你自己能登入**，其他成員按登入時會看到 GitHub 的 404 頁面。
+> 已經建成私有的，到 App 設定頁 **Advanced → Make public** 改成公開即可。
+> 公開不會讓別人看到你的資料：App 只能存取有安裝它的 repo，每個人也只看得到自己在 GitHub 上有權限的 repo。
 
 按 **Create GitHub App**。建立後在 App 頁面：
 
@@ -94,7 +98,7 @@ npm run deploy
 2. 按「綁定 repo」，選擇要當專案的 repo（建議先用一個測試 repo）。
 3. 回到 App 重新整理，點進專案 → 「初始化專案」（會寫入 `.taskapp/config.yml` 並建立 `status:` 標籤）。
 
-其他成員只要是該 repo 的 collaborator，登入後就會直接看到這個專案。
+其他成員只要是該 repo 的 collaborator（**要先接受 GitHub 的成員邀請**），登入後就會直接看到這個專案。
 
 ## 自動部署（選用）
 
