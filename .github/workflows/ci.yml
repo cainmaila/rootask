@@ -18,4 +18,4 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
-      - run: npx wrangler deploy --dry-run --outdir /tmp/worker-dry
+      - run: npx wrangler deploy --dry-run -c wrangler.example.toml --outdir /tmp/worker-dry

@@ -1,0 +1,28 @@
+# Rootask 部署設定範本。
+# 第一次執行 `npm run dev` 或 `npm run deploy` 時會自動複製成 wrangler.toml（不進 git），
+# 之後只改你自己的 wrangler.toml，這個範本不用動。
+
+# Worker 名稱，會成為網址的一部分：https://<name>.<你的子網域>.workers.dev
+name = "rootask"
+main = "worker/src/index.ts"
+compatibility_date = "2024-10-22"
+
+# 前端（web/dist）與 Worker 同網域部署；/api 與 /auth 先交給 Worker 處理
+[assets]
+directory = "./web/dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+run_worker_first = ["/api/*", "/auth/*"]
+
+[vars]
+# GitHub App 頁面上純數字的 App ID。只有啟用 webhook 自動化時需要（不是機密）。
+GITHUB_APP_ID = ""
+# GitHub App 的網址代稱（https://github.com/apps/<代稱>）。通常留空即可，Worker 會自動查詢。
+GITHUB_APP_SLUG = ""
+
+# 以下為機密，請用 `npx wrangler secret put <名稱>` 設定，不要寫在這裡：
+#   GITHUB_CLIENT_ID        GitHub App 的 Client ID
+#   GITHUB_CLIENT_SECRET    GitHub App 產生的 client secret
+#   SESSION_SECRET          任意 32 字元以上的亂數字串
+#   WEBHOOK_SECRET          與 GitHub App 設定的 webhook secret 相同
+#   GITHUB_APP_PRIVATE_KEY  GitHub App 的私鑰 .pem 全文（webhook 自動化需要）

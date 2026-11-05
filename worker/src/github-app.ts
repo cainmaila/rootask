@@ -77,6 +77,24 @@ async function appJwt(env: AppEnv): Promise<string> {
   return `${head}.${body}.${b64url(new Uint8Array(sig))}`;
 }
 
+let slugCache: string | null = null;
+
+/** 以 App 身分查詢自己的網址代稱（GET /app） */
+export async function appSlugFromKey(env: AppEnv): Promise<string> {
+  if (slugCache) return slugCache;
+  const res = await fetch(`${GH_API}/app`, {
+    headers: {
+      Authorization: `Bearer ${await appJwt(env)}`,
+      Accept: "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28",
+      "User-Agent": "rootask",
+    },
+  });
+  if (!res.ok) throw new Error(`查詢 App 失敗：${res.status}`);
+  slugCache = ((await res.json()) as { slug: string }).slug;
+  return slugCache;
+}
+
 const tokenCache = new Map<number, { token: string; exp: number }>();
 
 export async function installationToken(env: AppEnv, installationId: number): Promise<string> {

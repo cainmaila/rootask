@@ -10,7 +10,9 @@
     "build": "vite build",
     "typecheck": "tsc -p web/tsconfig.json --noEmit && tsc -p worker/tsconfig.json --noEmit",
     "deploy": "npm run build && wrangler deploy",
-    "test": "vitest run"
+    "test": "vitest run",
+    "predev": "node scripts/ensure-config.mjs",
+    "predeploy": "node scripts/ensure-config.mjs"
   },
   "dependencies": {
     "react": "^18.3.1",

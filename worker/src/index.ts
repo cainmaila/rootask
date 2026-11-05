@@ -9,11 +9,12 @@ import {
   sealSession,
 } from "./session";
 import { onIssues, onSubIssues, type IssuesEvent, type SubIssuesEvent } from "./automation";
-import { GhClient, installationToken } from "./github-app";
+import { GhClient, appSlugFromKey, installationToken } from "./github-app";
 
 export interface Env {
   ASSETS: Fetcher;
-  GITHUB_APP_SLUG: string;
+  /** 可留空，留空時自動查詢 */
+  GITHUB_APP_SLUG?: string;
   GITHUB_CLIENT_ID: string;
   GITHUB_CLIENT_SECRET: string;
   SESSION_SECRET: string;
@@ -140,13 +141,43 @@ async function currentSession(req: Request, env: Env): Promise<{ s: Session | nu
 
 async function sessionInfo(req: Request, env: Env): Promise<Response> {
   const { s, setCookie } = await currentSession(req, env);
+  const slug = s ? await resolveSlug(env, s.at) : null;
   const body = JSON.stringify({
     loggedIn: !!s,
-    installUrl: `https://github.com/apps/${env.GITHUB_APP_SLUG}/installations/new`,
+    // 查不到代稱時退回 GitHub 的 App 安裝管理頁，使用者仍可手動找到
+    installUrl: slug ? `https://github.com/apps/${slug}/installations/new` : "https://github.com/settings/installations",
   });
   const headers = new Headers({ "Content-Type": "application/json", "Cache-Control": "no-store" });
   if (setCookie) headers.append("Set-Cookie", setCookie);
   return new Response(body, { headers });
+}
+
+/**
+ * App 的網址代稱，依序：手動設定 → 用私鑰向 GitHub 查 → 從使用者已有的安裝紀錄取得。
+ * 這樣部署的人通常不用設定它。
+ */
+async function resolveSlug(env: Env, userToken: string): Promise<string | null> {
+  if (env.GITHUB_APP_SLUG?.trim()) return env.GITHUB_APP_SLUG.trim();
+  if (env.GITHUB_APP_ID?.trim() && env.GITHUB_APP_PRIVATE_KEY) {
+    try {
+      return await appSlugFromKey({ GITHUB_APP_ID: env.GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY: env.GITHUB_APP_PRIVATE_KEY });
+    } catch {
+      /* 繼續試下一個方法 */
+    }
+  }
+  try {
+    // GitHub App 的使用者 token 只看得到「這個 App」的安裝紀錄，每筆都帶 app_slug
+    const res = await fetch(`${GH_API}/user/installations?per_page=1`, {
+      headers: { Authorization: `Bearer ${userToken}`, Accept: "application/vnd.github+json", "User-Agent": "rootask" },
+    });
+    if (res.ok) {
+      const d = (await res.json()) as { installations: { app_slug?: string }[] };
+      return d.installations[0]?.app_slug ?? null;
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
 }
 
 // ---------- GitHub API 代理（token 不進前端） ----------
@@ -209,7 +240,7 @@ async function webhook(req: Request, env: Env, ctx: ExecutionContext): Promise<R
   // bot（包含我們自己）觸發的事件一律略過，避免自己改、自己再被觸發的迴圈
   if (payload.sender?.type === "Bot") return new Response(null, { status: 204 });
   if (event !== "issues" && event !== "sub_issues") return new Response(null, { status: 204 });
-  if (!env.GITHUB_APP_ID || !env.GITHUB_APP_PRIVATE_KEY || !payload.installation) {
+  if (!env.GITHUB_APP_ID?.trim() || !env.GITHUB_APP_PRIVATE_KEY || !payload.installation) {
     return new Response("automation disabled", { status: 202 });
   }
   const appEnv = { GITHUB_APP_ID: env.GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY: env.GITHUB_APP_PRIVATE_KEY };
