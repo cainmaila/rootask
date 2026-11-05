@@ -11,6 +11,8 @@ import {
   listComments,
   moveBlockReason,
   moveTask,
+  neighbor,
+  reorderTask,
   setStatus,
   statusOf,
   updateBody,
@@ -76,7 +78,7 @@ export function TaskDetail({ n, ctx, close, full = false, expand, open }: Props)
       return;
     }
     if (next.start === task.meta.start && next.due === task.meta.due) return;
-    void run(() => updateBody(owner, repo, n, { meta: next }));
+    void run(() => updateBody(owner, repo, n, { meta: { start: next.start, due: next.due } }));
   }
   const overdue = !isClosing(status.category) && isOverdue(meta.due, todayLocal());
 
@@ -248,6 +250,25 @@ export function TaskDetail({ n, ctx, close, full = false, expand, open }: Props)
           ))}
         </select>
       </label>
+
+      <div className="field">
+        <span>順序（桌面版可直接在列表拖曳）</span>
+        <div className="row-gap">
+          {([-1, 1] as const).map((dir) => {
+            const nb = neighbor(ctx.tree, n, dir);
+            return (
+              <button
+                key={dir}
+                className="btn small"
+                disabled={busy || !nb}
+                onClick={() => nb && run(() => reorderTask(owner, repo, ctx.tree, n, nb.target, nb.position))}
+              >
+                {dir < 0 ? "↑ 上移" : "↓ 下移"}
+              </button>
+            );
+          })}
+        </div>
+      </div>
 
       <div className="field">
         <span>預計時間</span>

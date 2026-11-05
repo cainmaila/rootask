@@ -228,3 +228,15 @@ textarea { resize: vertical; }
 @media (max-width: 899px) {
   .detail.full { position: static; inset: auto; max-height: none; border-radius: 14px; box-shadow: none; }
 }
+
+/* 拖曳排序（#42） */
+.grip { color: var(--muted); opacity: 0; cursor: grab; font-size: 12px; letter-spacing: -2px; padding: 0 2px; user-select: none; }
+.node:hover .grip { opacity: 0.6; }
+.node[draggable="true"] { position: relative; }
+li.dragging > .node { opacity: 0.4; }
+.node.drop-before::before, .node.drop-after::after {
+  content: ""; position: absolute; left: 24px; right: 4px; height: 2px; background: var(--accent); border-radius: 2px; pointer-events: none;
+}
+.node.drop-before::before { top: -1px; }
+.node.drop-after::after { bottom: -1px; }
+@media (hover: none) { .grip { display: none; } }

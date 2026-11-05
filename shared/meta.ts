@@ -7,6 +7,8 @@ export interface TaskMeta {
   start?: string;
   /** 預計截止日 YYYY-MM-DD */
   due?: string;
+  /** 最上層任務的排序值（#42）；沒有時以 issue 編號當排序值 */
+  rank?: number;
 }
 
 const RE = /\n*<!-- rootask:meta (\{.*?\}) -->\s*$/s;
@@ -28,6 +30,7 @@ export function parseMeta(body: string | null | undefined): { text: string; meta
     const meta: TaskMeta = {};
     if (isDate(obj.start)) meta.start = obj.start;
     if (isDate(obj.due)) meta.due = obj.due;
+    if (typeof obj.rank === "number" && Number.isFinite(obj.rank)) meta.rank = obj.rank;
     return { text: raw.slice(0, m.index).replace(/\s+$/, ""), meta };
   } catch {
     return { text: raw, meta: {} };
@@ -39,9 +42,21 @@ export function writeMeta(text: string, meta: TaskMeta): string {
   const clean: TaskMeta = {};
   if (meta.start && isDate(meta.start)) clean.start = meta.start;
   if (meta.due && isDate(meta.due)) clean.due = meta.due;
+  if (typeof meta.rank === "number" && Number.isFinite(meta.rank)) clean.rank = meta.rank;
   const base = parseMeta(text).text.replace(/\s+$/, ""); // 避免重複疊加
-  if (!clean.start && !clean.due) return base;
+  if (!clean.start && !clean.due && clean.rank === undefined) return base;
   return `${base}${base ? "\n\n" : ""}<!-- rootask:meta ${JSON.stringify(clean)} -->`;
+}
+
+/** 部分更新：只改 patch 裡有寫到的欄位，值為 undefined 代表刪除該欄位 */
+export function mergeMeta(cur: TaskMeta, patch: Partial<TaskMeta>): TaskMeta {
+  const next: TaskMeta = { ...cur };
+  for (const k of Object.keys(patch) as (keyof TaskMeta)[]) {
+    const v = patch[k];
+    if (v === undefined) delete next[k];
+    else (next as Record<string, unknown>)[k] = v;
+  }
+  return next;
 }
 
 /** 檢查預計日期的合理性，回傳錯誤訊息 */

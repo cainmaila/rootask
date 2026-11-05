@@ -1,6 +1,7 @@
 import { gh, graphql } from "./api";
 import { STATUS_PREFIX, isClosing, statusFromLabels, type ProjectConfig, type StatusDef } from "./config";
-import { parseMeta, writeMeta, type TaskMeta } from "../../shared/meta";
+import { mergeMeta, parseMeta, writeMeta, type TaskMeta } from "../../shared/meta";
+import { planMove, sortRoots, type DropPosition } from "../../shared/order";
 
 /** GitHub 原生 sub-issues 的巢狀上限 */
 export const MAX_DEPTH = 8;
@@ -27,6 +28,8 @@ export interface Task {
   labels: string[];
   assignees: Person[];
   parent: number | null;
+  /** GitHub 原生的子任務順序 */
+  childOrder: number[];
   updatedAt: string;
 }
 
@@ -45,6 +48,7 @@ query($owner: String!, $name: String!, $after: String) {
         labels(first: 30) { nodes { name } }
         assignees(first: 10) { nodes { login avatarUrl } }
         parent { number }
+        subIssues(first: 100) { nodes { number } }
       }
     }
   }
@@ -67,6 +71,7 @@ interface TreeQueryResult {
         labels: { nodes: { name: string }[] };
         assignees: { nodes: Person[] };
         parent: { number: number } | null;
+        subIssues: { nodes: { number: number }[] };
       }[];
     };
   };
@@ -92,6 +97,7 @@ export async function loadTree(owner: string, repo: string): Promise<TaskTree> {
         labels: n.labels.nodes.map((l) => l.name),
         assignees: n.assignees.nodes,
         parent: n.parent?.number ?? null,
+        childOrder: n.subIssues.nodes.map((c) => c.number),
         updatedAt: n.updatedAt,
       });
     }
@@ -109,7 +115,70 @@ export function buildTree(tasks: Task[]): TaskTree {
     if (!children.has(p)) children.set(p, []);
     children.get(p)!.push(t.number);
   }
+  // 子任務照 GitHub 原生順序；最上層照 rank（#42）
+  for (const [p, kids] of children) {
+    if (p === null) {
+      children.set(p, sortRoots(kids.map((n) => ({ number: n, rank: byNumber.get(n)!.meta.rank }))).map((x) => x.number));
+    } else {
+      const order = byNumber.get(p)!.childOrder;
+      const pos = new Map(order.map((n, i) => [n, i]));
+      kids.sort((a, b) => (pos.get(a) ?? 1e9) - (pos.get(b) ?? 1e9) || a - b);
+    }
+  }
   return { byNumber, children };
+}
+
+const orderable = (tree: TaskTree, n: number) => {
+  const t = tree.byNumber.get(n)!;
+  const parent = t.parent !== null && tree.byNumber.has(t.parent) ? t.parent : null;
+  return { number: n, rank: t.meta.rank, parent };
+};
+
+/**
+ * 把 moving 放到 target 的前或後（#42）。回傳 false 表示不能移動或位置沒變。
+ * 必要時先換父任務，再調整位置。
+ */
+export async function reorderTask(
+  owner: string,
+  repo: string,
+  tree: TaskTree,
+  moving: number,
+  target: number,
+  position: DropPosition,
+): Promise<boolean> {
+  if (moving === target) return false;
+  const m = orderable(tree, moving);
+  const t = orderable(tree, target);
+  if (t.parent !== m.parent && moveBlockReason(tree, moving, t.parent)) return false;
+  const plan = planMove(m, t, position, (p) => (tree.children.get(p) ?? []).map((n) => orderable(tree, n)));
+  if (plan.noop) return false;
+
+  const task = tree.byNumber.get(moving)!;
+  if (plan.reparent) await moveTask(owner, repo, { ...task, parent: m.parent }, plan.parent);
+
+  if (plan.parent === null) {
+    await updateBody(owner, repo, moving, { meta: { rank: plan.rank } });
+  } else if (plan.anchor) {
+    const sibling = tree.byNumber.get(plan.anchor.sibling)!;
+    await gh(`/repos/${owner}/${repo}/issues/${plan.parent}/sub_issues/priority`, {
+      method: "PATCH",
+      json: {
+        sub_issue_id: task.databaseId,
+        [plan.anchor.position === "before" ? "before_id" : "after_id"]: sibling.databaseId,
+      },
+    });
+  }
+  return true;
+}
+
+/** 上移／下移一格（手機用） */
+export function neighbor(tree: TaskTree, n: number, dir: -1 | 1): { target: number; position: DropPosition } | null {
+  const p = orderable(tree, n).parent;
+  const sibs = tree.children.get(p) ?? [];
+  const i = sibs.indexOf(n);
+  const j = i + dir;
+  if (i < 0 || j < 0 || j >= sibs.length) return null;
+  return { target: sibs[j], position: dir < 0 ? "before" : "after" };
 }
 
 // ---------- 樹的計算 ----------
@@ -217,11 +286,12 @@ export async function updateBody(
   owner: string,
   repo: string,
   n: number,
-  patch: { text?: string; meta?: TaskMeta },
+  patch: { text?: string; meta?: Partial<TaskMeta> },
 ): Promise<void> {
   const cur = await gh<{ body: string | null }>(`/repos/${owner}/${repo}/issues/${n}`);
   const parsed = parseMeta(cur.body);
-  const body = writeMeta(patch.text ?? parsed.text, patch.meta ?? parsed.meta);
+  // 欄位逐一合併：改日期不會動到排序值，反之亦然
+  const body = writeMeta(patch.text ?? parsed.text, patch.meta ? mergeMeta(parsed.meta, patch.meta) : parsed.meta);
   if (body === (cur.body ?? "")) return;
   await gh(`/repos/${owner}/${repo}/issues/${n}`, { method: "PATCH", json: { body } });
 }

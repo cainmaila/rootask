@@ -2,9 +2,19 @@ import { useCallback, useEffect, useState } from "react";
 import { loadConfig, saveConfig, type LoadedConfig } from "./config";
 import { Settings } from "./Settings";
 import { TaskDetail } from "./TaskDetail";
-import { TaskNode } from "./TaskNode";
+import { TaskNode, type DragCtx } from "./TaskNode";
 import { gh } from "./api";
-import { createTask, listAssignable, loadTree, myPermission, type Person, type TaskTree } from "./tasks";
+import {
+  createTask,
+  isDescendant,
+  listAssignable,
+  loadTree,
+  moveBlockReason,
+  myPermission,
+  reorderTask,
+  type Person,
+  type TaskTree,
+} from "./tasks";
 
 export interface ProjectCtx {
   owner: string;
@@ -29,6 +39,9 @@ export function ProjectView({ owner, repo, fullTask = null }: { owner: string; r
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const [newTitle, setNewTitle] = useState("");
   const [busy, setBusy] = useState(false);
+  const [dragging, setDragging] = useState<number | null>(null);
+  const [over, setOver] = useState<DragCtx["over"]>(null);
+  const [moveMsg, setMoveMsg] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     try {
@@ -58,6 +71,35 @@ export function ProjectView({ owner, repo, fullTask = null }: { owner: string; r
   if (!ctx) return <main className="page muted">載入任務中…</main>;
 
   const full: ProjectCtx = { ...ctx, reload };
+
+  const parentOf = (n: number) => {
+    const p = ctx.tree.byNumber.get(n)?.parent ?? null;
+    return p !== null && ctx.tree.byNumber.has(p) ? p : null;
+  };
+  const drag: DragCtx = {
+    dragging,
+    setDragging,
+    over,
+    setOver,
+    canDrop: (target) => {
+      if (dragging === null || dragging === target) return false;
+      if (isDescendant(ctx.tree, target, dragging)) return false; // 不能放進自己的子孫之間
+      const tp = parentOf(target);
+      return tp === parentOf(dragging) || !moveBlockReason(ctx.tree, dragging, tp);
+    },
+    drop: (target, position) => {
+      const moving = dragging;
+      setDragging(null);
+      if (moving === null) return;
+      setMoveMsg("調整順序中…");
+      reorderTask(owner, repo, ctx.tree, moving, target, position)
+        .then(async (changed) => {
+          if (changed) await reload();
+          setMoveMsg(null);
+        })
+        .catch((e: Error) => setMoveMsg(`調整順序失敗：${e.message}`));
+    },
+  };
 
   // 整頁任務檢視（#41）：網址 #/p/<owner>/<repo>/t/<n>，可直接分享
   if (fullTask !== null) {
@@ -166,6 +208,7 @@ export function ProjectView({ owner, repo, fullTask = null }: { owner: string; r
               </button>
             </form>
             {roots.length === 0 && <p className="muted empty">還沒有任務，從上面新增第一個吧。</p>}
+            {moveMsg && <p className="banner small">{moveMsg}</p>}
             <ul className="nodes">
               {roots.map((n) => (
                 <TaskNode
@@ -176,6 +219,7 @@ export function ProjectView({ owner, repo, fullTask = null }: { owner: string; r
                   toggle={toggle}
                   selected={selected}
                   select={setSelected}
+                  drag={drag}
                 />
               ))}
             </ul>

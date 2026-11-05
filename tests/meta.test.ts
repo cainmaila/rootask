@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isDate, isOverdue, metaError, parseMeta, todayLocal, writeMeta } from "../shared/meta";
+import { isDate, isOverdue, mergeMeta, metaError, parseMeta, todayLocal, writeMeta } from "../shared/meta";
 
 describe("任務日期的隱藏區塊", () => {
   it("沒有區塊時原樣回傳", () => {
@@ -47,5 +47,18 @@ describe("任務日期的隱藏區塊", () => {
     expect(isOverdue("2026-11-05", "2026-11-05")).toBe(false);
     expect(isOverdue(undefined, "2026-11-05")).toBe(false);
     expect(todayLocal(new Date(2026, 0, 3))).toBe("2026-01-03");
+  });
+
+  it("排序值可以單獨存在，也能和日期並存", () => {
+    expect(parseMeta(writeMeta("x", { rank: 2.5 })).meta).toEqual({ rank: 2.5 });
+    expect(parseMeta(writeMeta("x", { due: "2026-12-01", rank: -1 })).meta).toEqual({ due: "2026-12-01", rank: -1 });
+    expect(parseMeta('x\n<!-- rootask:meta {"rank":"abc"} -->').meta).toEqual({});
+  });
+
+  it("部分更新只改指定欄位，undefined 代表刪除", () => {
+    const cur = { start: "2026-11-01", due: "2026-11-04", rank: 3.5 };
+    expect(mergeMeta(cur, { due: "2026-11-09" })).toEqual({ start: "2026-11-01", due: "2026-11-09", rank: 3.5 });
+    expect(mergeMeta(cur, { start: undefined, due: undefined })).toEqual({ rank: 3.5 });
+    expect(mergeMeta(cur, { rank: 1 })).toEqual({ start: "2026-11-01", due: "2026-11-04", rank: 1 });
   });
 });
