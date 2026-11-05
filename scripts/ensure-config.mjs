@@ -38,3 +38,17 @@ if (!existsSync("local/.dev.vars")) {
     copyFileSync("local.example/.dev.vars", "local/.dev.vars");
   }
 }
+
+// 常見錯誤：改到範本 local.example/ 而不是自己的 local/，部署時讀不到修改
+import { execSync } from "node:child_process";
+try {
+  const changed = execSync("git status --porcelain -- local.example", { encoding: "utf8" }).trim();
+  if (changed) {
+    console.warn(
+      "\n[rootask] ⚠️  你修改了範本 local.example/，但部署讀的是 local/wrangler.toml。\n" +
+        "          請把修改搬到 local/ 裡，並用 `git checkout -- local.example` 還原範本。\n",
+    );
+  }
+} catch {
+  /* 沒有 git 時略過 */
+}
