@@ -42,7 +42,7 @@ export default {
 function login(url: URL, env: Env): Response {
   const state = randomState();
   const auth = new URL("https://github.com/login/oauth/authorize");
-  auth.searchParams.set("client_id", env.GITHUB_CLIENT_ID);
+  auth.searchParams.set("client_id", env.GITHUB_CLIENT_ID.trim());
   auth.searchParams.set("redirect_uri", `${url.origin}/auth/callback`);
   auth.searchParams.set("state", state);
   return new Response(null, {
@@ -63,7 +63,12 @@ async function exchange(env: Env, params: Record<string, string>): Promise<Sessi
   const res = await fetch("https://github.com/login/oauth/access_token", {
     method: "POST",
     headers: { Accept: "application/json", "Content-Type": "application/json" },
-    body: JSON.stringify({ client_id: env.GITHUB_CLIENT_ID, client_secret: env.GITHUB_CLIENT_SECRET, ...params }),
+    body: JSON.stringify({
+      // 貼上 secret 時常多帶換行或空白，這裡一律去掉
+      client_id: env.GITHUB_CLIENT_ID.trim(),
+      client_secret: env.GITHUB_CLIENT_SECRET.trim(),
+      ...params,
+    }),
   });
   const data = (await res.json()) as TokenResponse;
   if (!data.access_token) throw new Error(data.error_description ?? data.error ?? "token exchange failed");
