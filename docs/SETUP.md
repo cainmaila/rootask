@@ -96,6 +96,32 @@ npm run deploy
 
 其他成員只要是該 repo 的 collaborator，登入後就會直接看到這個專案。
 
+## 自動部署（選用）
+
+設定後，每次 push 到 `main` 且 CI 檢查通過，就會自動部署到 Cloudflare，不用再手動 `npm run deploy`。
+沒設定時這一步會自動跳過，不影響 CI。
+
+**1. 建立 Cloudflare API Token**
+
+1. 打開 <https://dash.cloudflare.com/profile/api-tokens> → **Create Token**
+2. 選範本 **Edit Cloudflare Workers** → **Use template**
+3. Account Resources 選你的帳號；Zone Resources 可選 *All zones*（只用 workers.dev 網址的話不影響）
+4. **Continue to summary** → **Create Token**，複製 token（只會顯示一次）
+
+**2. 在 GitHub repo 設定**（repo 的 Settings → Secrets and variables → Actions）
+
+| 類型 | 名稱 | 值 |
+|---|---|---|
+| Secrets 分頁 | `CLOUDFLARE_API_TOKEN` | 上一步的 token |
+| Variables 分頁 | `WORKER_NAME` | 你的 Worker 名稱（和 `local/wrangler.toml` 的 `name` 相同） |
+| Variables 分頁 | `GITHUB_APP_ID` | App ID（純數字，啟用 webhook 自動化才需要） |
+| Variables 分頁（選填） | `CLOUDFLARE_ACCOUNT_ID` | 你的 Cloudflare 帳號底下有多個 account 時才需要 |
+| Variables 分頁（選填） | `GITHUB_APP_SLUG` | 通常不用，Worker 會自動查詢 |
+
+設好後，到 repo 的 **Actions** 分頁找最新一次 CI，按 **Re-run all jobs** 就會部署一次。
+
+> Worker 上用 `npm run secret` 設定的機密（client secret、私鑰等）不會被自動部署覆蓋。
+
 ## 本機開發
 
 ```bash
