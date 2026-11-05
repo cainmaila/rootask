@@ -114,9 +114,9 @@ npm run deploy
 |---|---|---|
 | Secrets 分頁 | `CLOUDFLARE_API_TOKEN` | 上一步的 token |
 | Variables 分頁 | `WORKER_NAME` | 你的 Worker 名稱（和 `local/wrangler.toml` 的 `name` 相同） |
-| Variables 分頁 | `GITHUB_APP_ID` | App ID（純數字，啟用 webhook 自動化才需要） |
+| Variables 分頁 | `ROOTASK_APP_ID` | App ID（純數字，啟用 webhook 自動化才需要） |
 | Secrets 或 Variables 分頁（選填） | `CLOUDFLARE_ACCOUNT_ID` | 你的 Cloudflare 帳號底下有多個 account 時才需要 |
-| Variables 分頁（選填） | `GITHUB_APP_SLUG` | 通常不用，Worker 會自動查詢 |
+| Variables 分頁（選填） | `ROOTASK_APP_SLUG` | 通常不用，Worker 會自動查詢 |
 
 設好後，到 repo 的 **Actions** 分頁找最新一次 CI，按 **Re-run all jobs** 就會部署一次。
 

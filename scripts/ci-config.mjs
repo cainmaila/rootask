@@ -1,5 +1,6 @@
 // CI 部署用：依環境變數從範本產生 local/wrangler.toml。
-// 需要：WORKER_NAME；選填：GITHUB_APP_ID、GITHUB_APP_SLUG（留空時 Worker 會自動查詢）
+// 需要：WORKER_NAME；選填：ROOTASK_APP_ID、ROOTASK_APP_SLUG（留空時 Worker 會自動查詢）
+// （GitHub Actions 不允許 GITHUB_ 開頭的變數名稱，所以用 ROOTASK_ 前綴）
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 
 const name = process.env.WORKER_NAME?.trim();
@@ -20,8 +21,8 @@ const set = (toml, key, value) => {
 
 let toml = readFileSync("local.example/wrangler.toml", "utf8");
 toml = set(toml, "name", name);
-toml = set(toml, "GITHUB_APP_ID", process.env.GITHUB_APP_ID?.trim() ?? "");
-toml = set(toml, "GITHUB_APP_SLUG", process.env.GITHUB_APP_SLUG?.trim() ?? "");
+toml = set(toml, "GITHUB_APP_ID", process.env.ROOTASK_APP_ID?.trim() ?? "");
+toml = set(toml, "GITHUB_APP_SLUG", process.env.ROOTASK_APP_SLUG?.trim() ?? "");
 
 mkdirSync("local", { recursive: true });
 writeFileSync("local/wrangler.toml", toml);

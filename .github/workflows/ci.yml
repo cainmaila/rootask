@@ -35,8 +35,9 @@ jobs:
       # Secrets 或 Variables 都可以
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
       WORKER_NAME: ${{ vars.WORKER_NAME }}
-      GITHUB_APP_ID: ${{ vars.GITHUB_APP_ID }}
-      GITHUB_APP_SLUG: ${{ vars.GITHUB_APP_SLUG }}
+      # GitHub 不允許 GITHUB_ 開頭的變數名稱，所以用 ROOTASK_ 前綴
+      ROOTASK_APP_ID: ${{ vars.ROOTASK_APP_ID }}
+      ROOTASK_APP_SLUG: ${{ vars.ROOTASK_APP_SLUG }}
     steps:
       - name: 檢查是否已設定自動部署
         id: enabled
