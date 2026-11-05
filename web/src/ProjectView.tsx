@@ -18,7 +18,10 @@ export interface ProjectCtx {
   reload: () => Promise<void>;
 }
 
-export function ProjectView({ owner, repo }: { owner: string; repo: string }) {
+const projectHash = (owner: string, repo: string) => `#/p/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
+const taskHash = (owner: string, repo: string, n: number) => `${projectHash(owner, repo)}/t/${n}`;
+
+export function ProjectView({ owner, repo, fullTask = null }: { owner: string; repo: string; fullTask?: number | null }) {
   const [ctx, setCtx] = useState<Omit<ProjectCtx, "reload"> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<"tasks" | "settings">("tasks");
@@ -55,6 +58,33 @@ export function ProjectView({ owner, repo }: { owner: string; repo: string }) {
   if (!ctx) return <main className="page muted">載入任務中…</main>;
 
   const full: ProjectCtx = { ...ctx, reload };
+
+  // 整頁任務檢視（#41）：網址 #/p/<owner>/<repo>/t/<n>，可直接分享
+  if (fullTask !== null) {
+    if (!ctx.tree.byNumber.has(fullTask)) {
+      return (
+        <main className="page">
+          <p className="muted">找不到任務 #{fullTask}，可能已被刪除或你沒有權限。</p>
+          <a href={projectHash(owner, repo)}>回到任務列表</a>
+        </main>
+      );
+    }
+    return (
+      <main className="page wide">
+        <TaskDetail
+          key={fullTask}
+          n={fullTask}
+          ctx={full}
+          full
+          close={() => {
+            setSelected(fullTask);
+            location.hash = projectHash(owner, repo);
+          }}
+          open={(n) => (location.hash = taskHash(owner, repo, n))}
+        />
+      </main>
+    );
+  }
   const canAdmin = ctx.permission === "admin" || ctx.permission === "maintain";
   const roots = ctx.tree.children.get(null) ?? [];
 
@@ -151,7 +181,13 @@ export function ProjectView({ owner, repo }: { owner: string; repo: string }) {
             </ul>
           </section>
           {selected !== null && ctx.tree.byNumber.has(selected) && (
-            <TaskDetail key={selected} n={selected} ctx={full} close={() => setSelected(null)} />
+            <TaskDetail
+              key={selected}
+              n={selected}
+              ctx={full}
+              close={() => setSelected(null)}
+              expand={() => (location.hash = taskHash(owner, repo, selected))}
+            />
           )}
         </div>
       )}

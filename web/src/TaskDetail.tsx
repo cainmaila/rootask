@@ -2,9 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { isClosing, transitionAllowed } from "./config";
 import { isOverdue, metaError, todayLocal, type TaskMeta } from "../../shared/meta";
 import type { ProjectCtx } from "./ProjectView";
+import { AttachTextarea } from "./AttachTextarea";
 import { Markdown } from "./Markdown";
-import { uploadAttachment } from "./attachments";
-import { attachmentMarkdown } from "../../shared/attachments";
 import {
   actualTimes,
   addComment,
@@ -26,37 +25,39 @@ function fmtTime(iso: string | null): string {
 
 const MAX_ASSIGNEES = 10;
 
-export function TaskDetail({ n, ctx, close }: { n: number; ctx: ProjectCtx; close: () => void }) {
+interface Props {
+  n: number;
+  ctx: ProjectCtx;
+  close: () => void;
+  /** 整頁檢視（#41）；false 為側邊面板 */
+  full?: boolean;
+  /** 側邊面板 → 整頁 */
+  expand?: () => void;
+  /** 打開別的任務（整頁時點父任務、子任務用） */
+  open?: (n: number) => void;
+}
+
+export function TaskDetail({ n, ctx, close, full = false, expand, open }: Props) {
   const task = ctx.tree.byNumber.get(n)!;
   const { owner, repo, cfg } = ctx;
   const status = statusOf(task, cfg.config);
+  const threshold = cfg.config.attachment_threshold_mb ?? 10;
 
   const [title, setTitle] = useState(task.title);
   const [body, setBody] = useState(task.body ?? "");
+  const [editingBody, setEditingBody] = useState(false);
   const [comments, setComments] = useState<Comment[] | null>(null);
   const [draft, setDraft] = useState("");
-  const [uploading, setUploading] = useState<string | null>(null);
-
-  /** 上傳後把附件的 Markdown 接在留言草稿後面，使用者確認後再送出 */
-  async function attach(files: FileList | File[]) {
-    for (const f of Array.from(files)) {
-      setUploading(f.name || "圖片");
-      setErr(null);
-      try {
-        const r = await uploadAttachment(owner, repo, n, f, cfg.config.attachment_threshold_mb ?? 10);
-        const md = attachmentMarkdown(r);
-        setDraft((d) => (d && !d.endsWith("\n") ? `${d}\n${md}` : `${d}${md}`));
-      } catch (e) {
-        setErr(`上傳「${f.name}」失敗：${(e as Error).message}`);
-      } finally {
-        setUploading(null);
-      }
-    }
-  }
+  const [uploading, setUploading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [meta, setMeta] = useState<TaskMeta>(task.meta);
   const [actual, setActual] = useState<ActualTimes | null>(null);
+
+  // 別人改了內容而自己沒在編輯時，跟著更新
+  useEffect(() => {
+    if (!editingBody) setBody(task.body ?? "");
+  }, [task.body, editingBody]);
 
   useEffect(() => {
     listComments(owner, repo, n).then(setComments, (e: Error) => setErr(e.message));
@@ -100,6 +101,11 @@ export function TaskDetail({ n, ctx, close }: { n: number; ctx: ProjectCtx; clos
     }
   }
 
+  function saveBody() {
+    setEditingBody(false);
+    if (body !== (task.body ?? "")) void run(() => updateBody(owner, repo, n, { text: body }));
+  }
+
   const assigned = new Set(task.assignees.map((a) => a.login));
   function toggleAssignee(login: string) {
     const next = new Set(assigned);
@@ -108,22 +114,100 @@ export function TaskDetail({ n, ctx, close }: { n: number; ctx: ProjectCtx; clos
     void run(() => updateTask(owner, repo, n, { assignees: [...next] }));
   }
 
-  return (
-    <aside className="detail">
-      <div className="detail-head">
-        <span className="muted small">#{task.number}</span>
-        <button className="icon" onClick={close} aria-label="關閉">
-          ✕
+  const parent = task.parent !== null ? ctx.tree.byNumber.get(task.parent) : undefined;
+  const kids = (ctx.tree.children.get(n) ?? []).map((k) => ctx.tree.byNumber.get(k)!);
+
+  // ---------- 區塊 ----------
+
+  const head = (
+    <div className="detail-head">
+      <span className="muted small">
+        {full && parent && (
+          <>
+            <button className="link-btn" onClick={() => open?.(parent.number)}>
+              #{parent.number} {parent.title}
+            </button>
+            {" › "}
+          </>
+        )}
+        #{task.number}
+      </span>
+      <span>
+        {!full && expand && (
+          <button className="icon" onClick={expand} title="展開成整頁" aria-label="展開成整頁">
+            ⤢
+          </button>
+        )}
+        <button className="icon" onClick={close} aria-label={full ? "回到任務列表" : "關閉"} title={full ? "回到任務列表" : "關閉"}>
+          {full ? "⤡" : "✕"}
         </button>
-      </div>
+      </span>
+    </div>
+  );
 
-      <input
-        className="title-input"
-        value={title}
-        onChange={(e) => setTitle(e.target.value)}
-        onBlur={() => title.trim() && title !== task.title && run(() => updateTask(owner, repo, n, { title: title.trim() }))}
-      />
+  const titleInput = (
+    <input
+      className="title-input"
+      value={title}
+      onChange={(e) => setTitle(e.target.value)}
+      onBlur={() => title.trim() && title !== task.title && run(() => updateTask(owner, repo, n, { title: title.trim() }))}
+    />
+  );
 
+  const description = (
+    <div className="field">
+      <span className="field-head">
+        說明
+        {!editingBody && (
+          <button className="link-btn small" onClick={() => setEditingBody(true)}>
+            編輯
+          </button>
+        )}
+      </span>
+      {editingBody ? (
+        <AttachTextarea
+          owner={owner}
+          repo={repo}
+          issue={n}
+          thresholdMb={threshold}
+          rows={full ? 12 : 6}
+          autoFocus
+          value={body}
+          onChange={setBody}
+          onUploadingChange={setUploading}
+          onError={setErr}
+          placeholder="補充說明（支援 Markdown，可貼上或拖曳圖片）"
+          actions={
+            <span className="row-gap">
+              <button
+                className="btn"
+                onClick={() => {
+                  setBody(task.body ?? "");
+                  setEditingBody(false);
+                }}
+              >
+                取消
+              </button>
+              <button className="btn primary" disabled={uploading || busy} onClick={saveBody}>
+                儲存
+              </button>
+            </span>
+          }
+        />
+      ) : body.trim() ? (
+        <div className="description" onDoubleClick={() => setEditingBody(true)}>
+          <Markdown text={body} />
+        </div>
+      ) : (
+        <button className="description empty" onClick={() => setEditingBody(true)}>
+          加上說明或圖片…
+        </button>
+      )}
+    </div>
+  );
+
+  const properties = (
+    <>
       <label className="field">
         <span>狀態</span>
         <select
@@ -216,19 +300,29 @@ export function TaskDetail({ n, ctx, close }: { n: number; ctx: ProjectCtx; clos
         </div>
       </div>
 
-      <label className="field">
-        <span>說明</span>
-        <textarea
-          rows={5}
-          value={body}
-          onChange={(e) => setBody(e.target.value)}
-          onBlur={() => body !== (task.body ?? "") && run(() => updateBody(owner, repo, n, { text: body }))}
-          placeholder="補充說明（支援 Markdown）"
-        />
-      </label>
+      {full && kids.length > 0 && (
+        <div className="field">
+          <span>子任務</span>
+          <ul className="kid-list">
+            {kids.map((k) => {
+              const ks = statusOf(k, cfg.config);
+              return (
+                <li key={k.number}>
+                  <button className="link-btn" onClick={() => open?.(k.number)}>
+                    #{k.number} {k.title}
+                  </button>
+                  <span className={`pill cat-${ks.category}`}>{ks.name}</span>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+    </>
+  );
 
-      {err && <p className="error small">{err}</p>}
-
+  const commentSection = (
+    <>
       <h3>留言</h3>
       {!comments && <p className="muted small">載入中…</p>}
       <ul className="comments">
@@ -257,46 +351,53 @@ export function TaskDetail({ n, ctx, close }: { n: number; ctx: ProjectCtx; clos
           });
         }}
       >
-        <textarea
-          rows={3}
+        <AttachTextarea
+          owner={owner}
+          repo={repo}
+          issue={n}
+          thresholdMb={threshold}
           value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onPaste={(e) => {
-            // 直接貼上截圖
-            const files = [...e.clipboardData.files];
-            if (files.length) {
-              e.preventDefault();
-              void attach(files);
-            }
-          }}
-          onDragOver={(e) => e.preventDefault()}
-          onDrop={(e) => {
-            if (e.dataTransfer.files.length) {
-              e.preventDefault();
-              void attach(e.dataTransfer.files);
-            }
-          }}
+          onChange={setDraft}
+          onUploadingChange={setUploading}
+          onError={setErr}
           placeholder="寫下留言…（可直接貼上或拖曳檔案）"
+          actions={
+            <button className="btn primary" disabled={busy || uploading || !draft.trim()}>
+              送出
+            </button>
+          }
         />
-        <div className="comment-actions">
-          <label className={`btn ${uploading ? "disabled" : ""}`}>
-            {uploading ? `上傳中：${uploading}…` : "📎 附加檔案"}
-            <input
-              type="file"
-              multiple
-              hidden
-              disabled={!!uploading}
-              onChange={(e) => {
-                if (e.target.files?.length) void attach(e.target.files);
-                e.target.value = "";
-              }}
-            />
-          </label>
-          <button className="btn primary" disabled={busy || !!uploading || !draft.trim()}>
-            送出
-          </button>
-        </div>
       </form>
+    </>
+  );
+
+  const error = err && <p className="error small">{err}</p>;
+
+  if (full) {
+    return (
+      <article className="detail full">
+        {head}
+        {titleInput}
+        <div className="full-grid">
+          <div className="full-main">
+            {description}
+            {error}
+            {commentSection}
+          </div>
+          <div className="full-side">{properties}</div>
+        </div>
+      </article>
+    );
+  }
+
+  return (
+    <aside className="detail">
+      {head}
+      {titleInput}
+      {properties}
+      {description}
+      {error}
+      {commentSection}
     </aside>
   );
 }
