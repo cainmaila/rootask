@@ -82,10 +82,18 @@ async function exchange(env: Env, params: Record<string, string>): Promise<Sessi
 async function callback(req: Request, url: URL, env: Env): Promise<Response> {
   const code = url.searchParams.get("code");
   const state = url.searchParams.get("state");
-  // 從「安裝 App」流程回來時 GitHub 也會帶 code，但沒有我們的 state
   const expected = readCookie(req, STATE_COOKIE);
   if (!code) return Response.redirect(`${url.origin}/`, 302);
-  if (expected && state !== expected) return new Response("登入狀態驗證失敗，請重新登入", { status: 400 });
+
+  // 只接受帶著我們自己發出的 state 回來的 code（防 CSRF：別人塞 code 讓你登入成他的帳號）。
+  // 從「安裝 App」流程回來時 GitHub 也會帶 code，但沒有 state；這時不使用那個 code，
+  // 改走一次正常登入。使用者已授權過，GitHub 會直接跳回，不會再問一次。
+  if (!expected || state !== expected) {
+    if (url.searchParams.has("installation_id") || url.searchParams.has("setup_action")) {
+      return Response.redirect(`${url.origin}/auth/login`, 302);
+    }
+    return new Response("登入狀態驗證失敗，請回到首頁重新登入", { status: 400 });
+  }
 
   try {
     const s = await exchange(env, { code, redirect_uri: `${url.origin}/auth/callback` });
