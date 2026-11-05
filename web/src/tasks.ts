@@ -1,5 +1,6 @@
 import { gh, graphql } from "./api";
-import { STATUS_PREFIX, statusFromLabels, type ProjectConfig, type StatusDef } from "./config";
+import { STATUS_PREFIX, isClosing, statusFromLabels, type ProjectConfig, type StatusDef } from "./config";
+import { parseMeta, writeMeta, type TaskMeta } from "../../shared/meta";
 
 /** GitHub 原生 sub-issues 的巢狀上限 */
 export const MAX_DEPTH = 8;
@@ -16,7 +17,11 @@ export interface Task {
   databaseId: number; // REST 的 id（sub_issue_id 要用這個）
   number: number;
   title: string;
+  /** 使用者看到的內文（已拿掉隱藏欄位） */
   body: string;
+  /** 預計開始／截止 */
+  meta: TaskMeta;
+  closedAt: string | null;
   state: "OPEN" | "CLOSED";
   stateReason: string | null;
   labels: string[];
@@ -36,7 +41,7 @@ query($owner: String!, $name: String!, $after: String) {
     issues(first: 100, after: $after, orderBy: {field: CREATED_AT, direction: ASC}) {
       pageInfo { hasNextPage endCursor }
       nodes {
-        id databaseId number title body state stateReason updatedAt
+        id databaseId number title body state stateReason updatedAt closedAt
         labels(first: 30) { nodes { name } }
         assignees(first: 10) { nodes { login avatarUrl } }
         parent { number }
@@ -58,6 +63,7 @@ interface TreeQueryResult {
         state: "OPEN" | "CLOSED";
         stateReason: string | null;
         updatedAt: string;
+        closedAt: string | null;
         labels: { nodes: { name: string }[] };
         assignees: { nodes: Person[] };
         parent: { number: number } | null;
@@ -72,12 +78,15 @@ export async function loadTree(owner: string, repo: string): Promise<TaskTree> {
   do {
     const r: TreeQueryResult = await graphql<TreeQueryResult>(TREE_QUERY, { owner, name: repo, after });
     for (const n of r.repository.issues.nodes) {
+      const { text, meta } = parseMeta(n.body);
       tasks.push({
         id: n.id,
         databaseId: n.databaseId,
         number: n.number,
         title: n.title,
-        body: n.body,
+        body: text,
+        meta,
+        closedAt: n.closedAt,
         state: n.state,
         stateReason: n.stateReason,
         labels: n.labels.nodes.map((l) => l.name),
@@ -198,9 +207,46 @@ export async function updateTask(
   owner: string,
   repo: string,
   n: number,
-  patch: { title?: string; body?: string; assignees?: string[] },
+  patch: { title?: string; assignees?: string[] },
 ): Promise<void> {
   await gh(`/repos/${owner}/${repo}/issues/${n}`, { method: "PATCH", json: patch });
+}
+
+/** 改內文或預計日期；兩者存在同一個 body，先讀最新的再合併，避免蓋掉別人剛改的另一半 */
+export async function updateBody(
+  owner: string,
+  repo: string,
+  n: number,
+  patch: { text?: string; meta?: TaskMeta },
+): Promise<void> {
+  const cur = await gh<{ body: string | null }>(`/repos/${owner}/${repo}/issues/${n}`);
+  const parsed = parseMeta(cur.body);
+  const body = writeMeta(patch.text ?? parsed.text, patch.meta ?? parsed.meta);
+  if (body === (cur.body ?? "")) return;
+  await gh(`/repos/${owner}/${repo}/issues/${n}`, { method: "PATCH", json: { body } });
+}
+
+export interface ActualTimes {
+  /** 第一次進入進行中（或直接完成）的時間 */
+  start: string | null;
+  /** 以完成關閉的時間 */
+  end: string | null;
+}
+
+/** 從 issue 的事件紀錄推算實際開始／完成 */
+export async function actualTimes(owner: string, repo: string, task: Task, config: ProjectConfig): Promise<ActualTimes> {
+  const started = new Set(config.statuses.filter((s) => s.category === "active" || s.category === "done").map((s) => STATUS_PREFIX + s.id));
+  let start: string | null = null;
+  for (let page = 1; page <= 10 && !start; page++) {
+    const evs = await gh<{ event: string; created_at: string; label?: { name: string } }[]>(
+      `/repos/${owner}/${repo}/issues/${task.number}/events?per_page=100&page=${page}`,
+    );
+    start = evs.find((e) => e.event === "labeled" && e.label && started.has(e.label.name))?.created_at ?? null;
+    if (evs.length < 100) break;
+  }
+  const status = statusFromLabels(task.labels, task.state === "CLOSED" ? "closed" : "open", task.stateReason, config);
+  const end = task.state === "CLOSED" && isClosing(status.category) && status.category === "done" ? task.closedAt : null;
+  return { start, end };
 }
 
 export interface Comment {

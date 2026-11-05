@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { transitionAllowed } from "./config";
+import { isClosing, transitionAllowed } from "./config";
+import { isOverdue, metaError, todayLocal, type TaskMeta } from "../../shared/meta";
 import type { ProjectCtx } from "./ProjectView";
 import {
+  actualTimes,
   addComment,
   depthOf,
   listComments,
@@ -9,9 +11,15 @@ import {
   moveTask,
   setStatus,
   statusOf,
+  updateBody,
   updateTask,
+  type ActualTimes,
   type Comment,
 } from "./tasks";
+
+function fmtTime(iso: string | null): string {
+  return iso ? new Date(iso).toLocaleString("zh-TW", { dateStyle: "medium", timeStyle: "short" }) : "—";
+}
 
 const MAX_ASSIGNEES = 10;
 
@@ -26,10 +34,29 @@ export function TaskDetail({ n, ctx, close }: { n: number; ctx: ProjectCtx; clos
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [meta, setMeta] = useState<TaskMeta>(task.meta);
+  const [actual, setActual] = useState<ActualTimes | null>(null);
 
   useEffect(() => {
     listComments(owner, repo, n).then(setComments, (e: Error) => setErr(e.message));
   }, [owner, repo, n]);
+
+  useEffect(() => {
+    actualTimes(owner, repo, task, cfg.config).then(setActual, () => setActual({ start: null, end: null }));
+    // 狀態或關閉時間變了才重算
+  }, [owner, repo, task.number, task.state, task.closedAt, task.labels.join(","), cfg.config]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function saveDates(next: TaskMeta) {
+    setMeta(next);
+    const e = metaError(next);
+    if (e) {
+      setErr(e);
+      return;
+    }
+    if (next.start === task.meta.start && next.due === task.meta.due) return;
+    void run(() => updateBody(owner, repo, n, { meta: next }));
+  }
+  const overdue = !isClosing(status.category) && isOverdue(meta.due, todayLocal());
 
   // 可移動的目標：ROOT ＋ 所有合法的父任務
   const targets = useMemo(() => {
@@ -118,6 +145,40 @@ export function TaskDetail({ n, ctx, close }: { n: number; ctx: ProjectCtx; clos
       </label>
 
       <div className="field">
+        <span>預計時間</span>
+        <div className="dates">
+          <label>
+            開始
+            <input
+              type="date"
+              value={meta.start ?? ""}
+              max={meta.due}
+              disabled={busy}
+              onChange={(e) => saveDates({ ...meta, start: e.target.value || undefined })}
+            />
+          </label>
+          <label className={overdue ? "overdue" : ""}>
+            截止{overdue && "（已逾期）"}
+            <input
+              type="date"
+              value={meta.due ?? ""}
+              min={meta.start}
+              disabled={busy}
+              onChange={(e) => saveDates({ ...meta, due: e.target.value || undefined })}
+            />
+          </label>
+        </div>
+      </div>
+
+      <div className="field">
+        <span>實際時間（依紀錄自動計算）</span>
+        <div className="actual small">
+          <span>開始：{actual ? fmtTime(actual.start) : "…"}</span>
+          <span>完成：{actual ? fmtTime(actual.end) : "…"}</span>
+        </div>
+      </div>
+
+      <div className="field">
         <span>分配人</span>
         <div className="people">
           {ctx.people.map((p) => (
@@ -140,7 +201,7 @@ export function TaskDetail({ n, ctx, close }: { n: number; ctx: ProjectCtx; clos
           rows={5}
           value={body}
           onChange={(e) => setBody(e.target.value)}
-          onBlur={() => body !== (task.body ?? "") && run(() => updateTask(owner, repo, n, { body }))}
+          onBlur={() => body !== (task.body ?? "") && run(() => updateBody(owner, repo, n, { text: body }))}
           placeholder="補充說明（支援 Markdown）"
         />
       </label>

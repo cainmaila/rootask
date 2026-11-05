@@ -1,5 +1,7 @@
 import { useState } from "react";
 import type { ProjectCtx } from "./ProjectView";
+import { isClosing } from "./config";
+import { isOverdue, todayLocal } from "../../shared/meta";
 import { MAX_CHILDREN, MAX_DEPTH, createTask, depthOf, statusOf } from "./tasks";
 
 interface Props {
@@ -54,6 +56,14 @@ export function TaskNode({ n, ctx, expanded, toggle, selected, select }: Props) 
         <button className="node-main" onClick={() => select(n)}>
           <span className="node-title">{task.title}</span>
           <span className="node-meta">
+            {task.meta.due && (
+              <span
+                className={`due small ${!isClosing(status.category) && isOverdue(task.meta.due, todayLocal()) ? "overdue" : ""}`}
+                title="預計截止"
+              >
+                {task.meta.due.slice(5).replace("-", "/")}
+              </span>
+            )}
             <span className={`pill cat-${status.category}`}>{status.name}</span>
             {kids.length > 0 && (
               <span className="muted small">
