@@ -84,7 +84,10 @@ export function TaskNode({ n, ctx, expanded, toggle, selected, select, drag }: P
         }}
         onDrop={(e) => {
           e.preventDefault();
-          const pos = drag.over?.n === n ? drag.over.position : "after";
+          // 放開當下直接用滑鼠位置判斷上／下半，不依賴 dragover 記下的狀態
+          // （真實拖曳時 dragleave 可能先把它清掉，#42 實測）
+          const r = e.currentTarget.getBoundingClientRect();
+          const pos = e.clientY < r.top + r.height / 2 ? "before" : "after";
           drag.setOver(null);
           drag.drop(n, pos);
         }}
