@@ -17,6 +17,14 @@ statuses:
   - id: dropped
     name: 放棄
     category: cancelled
-transitions: []
-auto_complete_parent: false
+transitions:
+  # 待審核 → 完成 需要 maintain 以上（核准關卡）
+  - from: review
+    to: done
+    allowed: [maintain]
+  # 不能從待處理直接跳到完成
+  - from: todo
+    to: done
+    allowed: none
+auto_complete_parent: true
 attachment_threshold_mb: 10
