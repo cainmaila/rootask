@@ -1,0 +1,22 @@
+# Rootask 專案設定。可以在 App 的設定頁修改，也可以直接編輯這個檔案。
+# 這個 repo 本身也用 Rootask 管理開發任務（吃自己的狗糧）。
+version: 1
+statuses:
+  - id: todo
+    name: 待處理
+    category: todo
+  - id: doing
+    name: 進行中
+    category: active
+  - id: review
+    name: 待審核
+    category: active
+  - id: done
+    name: 完成
+    category: done
+  - id: dropped
+    name: 放棄
+    category: cancelled
+transitions: []
+auto_complete_parent: false
+attachment_threshold_mb: 10
