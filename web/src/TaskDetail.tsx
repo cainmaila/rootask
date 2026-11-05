@@ -2,6 +2,9 @@ import { useEffect, useMemo, useState } from "react";
 import { isClosing, transitionAllowed } from "./config";
 import { isOverdue, metaError, todayLocal, type TaskMeta } from "../../shared/meta";
 import type { ProjectCtx } from "./ProjectView";
+import { Markdown } from "./Markdown";
+import { uploadAttachment } from "./attachments";
+import { attachmentMarkdown } from "../../shared/attachments";
 import {
   actualTimes,
   addComment,
@@ -32,6 +35,24 @@ export function TaskDetail({ n, ctx, close }: { n: number; ctx: ProjectCtx; clos
   const [body, setBody] = useState(task.body ?? "");
   const [comments, setComments] = useState<Comment[] | null>(null);
   const [draft, setDraft] = useState("");
+  const [uploading, setUploading] = useState<string | null>(null);
+
+  /** 上傳後把附件的 Markdown 接在留言草稿後面，使用者確認後再送出 */
+  async function attach(files: FileList | File[]) {
+    for (const f of Array.from(files)) {
+      setUploading(f.name || "圖片");
+      setErr(null);
+      try {
+        const r = await uploadAttachment(owner, repo, n, f, cfg.config.attachment_threshold_mb ?? 10);
+        const md = attachmentMarkdown(r);
+        setDraft((d) => (d && !d.endsWith("\n") ? `${d}\n${md}` : `${d}${md}`));
+      } catch (e) {
+        setErr(`上傳「${f.name}」失敗：${(e as Error).message}`);
+      } finally {
+        setUploading(null);
+      }
+    }
+  }
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [meta, setMeta] = useState<TaskMeta>(task.meta);
@@ -218,7 +239,9 @@ export function TaskDetail({ n, ctx, close }: { n: number; ctx: ProjectCtx; clos
               <b>{c.user?.login ?? "已刪除的使用者"}</b>
               <span className="muted small">{new Date(c.created_at).toLocaleString("zh-TW")}</span>
             </div>
-            <div className="comment-body">{c.body}</div>
+            <div className="comment-body">
+              <Markdown text={c.body} />
+            </div>
           </li>
         ))}
       </ul>
@@ -234,10 +257,45 @@ export function TaskDetail({ n, ctx, close }: { n: number; ctx: ProjectCtx; clos
           });
         }}
       >
-        <textarea rows={3} value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="寫下留言…" />
-        <button className="btn primary" disabled={busy || !draft.trim()}>
-          送出
-        </button>
+        <textarea
+          rows={3}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onPaste={(e) => {
+            // 直接貼上截圖
+            const files = [...e.clipboardData.files];
+            if (files.length) {
+              e.preventDefault();
+              void attach(files);
+            }
+          }}
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={(e) => {
+            if (e.dataTransfer.files.length) {
+              e.preventDefault();
+              void attach(e.dataTransfer.files);
+            }
+          }}
+          placeholder="寫下留言…（可直接貼上或拖曳檔案）"
+        />
+        <div className="comment-actions">
+          <label className={`btn ${uploading ? "disabled" : ""}`}>
+            {uploading ? `上傳中：${uploading}…` : "📎 附加檔案"}
+            <input
+              type="file"
+              multiple
+              hidden
+              disabled={!!uploading}
+              onChange={(e) => {
+                if (e.target.files?.length) void attach(e.target.files);
+                e.target.value = "";
+              }}
+            />
+          </label>
+          <button className="btn primary" disabled={busy || !!uploading || !draft.trim()}>
+            送出
+          </button>
+        </div>
       </form>
     </aside>
   );

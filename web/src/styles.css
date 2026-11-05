@@ -171,7 +171,7 @@ textarea { resize: vertical; }
 .person.on { background: var(--sel); border-color: var(--accent); }
 .comments { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
 .comment-head { display: flex; align-items: center; gap: 6px; font-size: 13px; }
-.comment-body { white-space: pre-wrap; padding: 4px 0 0 26px; }
+.comment-body { padding: 4px 0 0 26px; overflow-wrap: anywhere; }
 .comment-form { display: grid; gap: 8px; justify-items: end; }
 
 /* 設定 */
@@ -190,3 +190,10 @@ textarea { resize: vertical; }
 .actual { display: flex; gap: 16px; flex-wrap: wrap; color: var(--muted); }
 .due { color: var(--muted); font-variant-numeric: tabular-nums; }
 .overdue { color: var(--danger) !important; }
+
+/* 留言附件 */
+.comment-actions { display: flex; gap: 8px; justify-content: space-between; width: 100%; }
+.comment-form { justify-items: stretch; }
+.btn.disabled { opacity: 0.6; pointer-events: none; }
+.md-img { display: inline-block; margin: 4px 0; }
+.md-img img { max-width: 100%; max-height: 320px; border-radius: 8px; border: 1px solid var(--line); display: block; }

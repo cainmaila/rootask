@@ -10,6 +10,7 @@ import {
 } from "./session";
 import { onIssues, onSubIssues, type IssuesEvent, type SubIssuesEvent } from "./automation";
 import { GhClient, appSlugFromKey, installationToken } from "./github-app";
+import { HttpError, download, upload } from "./files";
 
 export interface Env {
   ASSETS: Fetcher;
@@ -37,6 +38,8 @@ export default {
     if (p === "/auth/logout") return logout();
     if (p === "/api/session") return sessionInfo(req, env);
     if (p === "/api/webhook" && req.method === "POST") return webhook(req, env, ctx);
+    if (p === "/api/files/upload" && req.method === "POST") return filesUpload(req, url, env);
+    if (p === "/api/files" && req.method === "GET") return filesDownload(req, url, env);
     if (p.startsWith("/api/gh/")) return proxy(req, url, env);
 
     return env.ASSETS.fetch(req);
@@ -178,6 +181,49 @@ async function resolveSlug(env: Env, userToken: string): Promise<string | null> 
     /* ignore */
   }
   return null;
+}
+
+// ---------- 附件 ----------
+
+async function withSession(req: Request, env: Env, fn: (token: string) => Promise<Response>): Promise<Response> {
+  const { s, setCookie } = await currentSession(req, env);
+  let res: Response;
+  if (!s) res = new Response(JSON.stringify({ message: "not logged in" }), { status: 401 });
+  else {
+    try {
+      res = await fn(s.at);
+    } catch (e) {
+      const status = e instanceof HttpError ? e.status : 500;
+      res = new Response(JSON.stringify({ message: (e as Error).message }), {
+        status: status >= 400 ? status : 500,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+  }
+  if (setCookie) {
+    res = new Response(res.body, res);
+    res.headers.append("Set-Cookie", setCookie);
+  }
+  return res;
+}
+
+function filesUpload(req: Request, url: URL, env: Env): Promise<Response> {
+  return withSession(req, env, async (token) => {
+    const q = url.searchParams;
+    const owner = q.get("owner") ?? "";
+    const repo = q.get("repo") ?? "";
+    const issue = Number(q.get("issue"));
+    const name = q.get("name") ?? "file";
+    if (!/^[\w.-]+$/.test(owner) || !/^[\w.-]+$/.test(repo) || !Number.isInteger(issue) || issue <= 0) {
+      return new Response(JSON.stringify({ message: "參數錯誤" }), { status: 400 });
+    }
+    const r = await upload(token, req, { owner, repo, issue, name, thresholdMb: Number(q.get("threshold") ?? "10") || 10 });
+    return new Response(JSON.stringify(r), { headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });
+  });
+}
+
+function filesDownload(req: Request, url: URL, env: Env): Promise<Response> {
+  return withSession(req, env, (token) => download(token, url.searchParams.get("u") ?? ""));
 }
 
 // ---------- GitHub API 代理（token 不進前端） ----------

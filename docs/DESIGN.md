@@ -80,12 +80,17 @@ statuses:
 - 介面端先隱藏不允許的選項，伺服器端（webhook）再檢查一次，涵蓋直接在 GitHub 網頁上操作的情況。
 - 共用邏輯在 `shared/rules.ts`，前端和 Worker 都用它。
 
-### 附件（第二階段，2026-11-04）
+### 附件（第二階段，2026-11-04；實作 2026-11-05）
 
 - **不用 Git LFS**（會計費）。
-- 小於門檻（預設 10 MB，config 可調）：commit 到專用分支 `taskapp-assets`。
-- 大於門檻（最大 2 GB）：上傳成 Release 附件（不限總容量與頻寬），App 自動管理專用 release，滿 1000 個附件開下一個；優先試草稿 release。
-- 私有 repo 的附件經 Worker 代理下載。
+- 小於門檻（預設 10 MB，config 的 `attachment_threshold_mb`，上限 50 MB）：commit 到專用的 **orphan 分支** `taskapp-assets`（不含任何程式碼），路徑 `attachments/<issue>/<issue>-<時間>-<亂數>-<安全檔名>`。
+- 大於門檻：上傳成 **prerelease** 的附件（`taskapp-attachments-001`…，滿 1000 個開下一個，`make_latest: false`）。
+  - 原計畫用草稿 release，但草稿只有寫入權限的成員看得到，唯讀成員會打不開附件，所以改用 prerelease。代價：Releases 頁多一筆，建立時關注 release 的人收到一次通知。
+  - 原始檔名存在附件的 label（GitHub 附件名稱不接受非 ASCII）。
+- **單檔上限 100 MB**：上傳經過 Cloudflare Worker，免費方案每次請求最多 100 MB。大檔以串流轉送，不整個讀進 Worker 記憶體。
+- 留言裡存 **GitHub 原生網址**（分支 blob 網址、release 下載網址），在 GitHub 網頁上也點得開；App 顯示時改走 `/api/files?u=`，由 Worker 帶登入者 token 取回，私有 repo 的圖片也能直接顯示。
+- Worker 只代理符合上述兩種格式的網址；分支附件以 `Content-Security-Policy: sandbox` 回傳，避免上傳的 HTML／SVG 在我們網域執行。
+- 全部操作用登入者本人的 token，權限由 GitHub 決定。
 
 ### 日期與甘特圖（2026-11-05）
 
