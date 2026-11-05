@@ -195,7 +195,7 @@ textarea { resize: vertical; }
 .comment-actions { display: flex; gap: 8px; justify-content: space-between; width: 100%; }
 .comment-form { justify-items: stretch; }
 .btn.disabled { opacity: 0.6; pointer-events: none; }
-.md-img { display: inline-block; margin: 4px 0; }
+.md-img { display: block; width: fit-content; margin: 6px 0; }
 .md-img img { max-width: 100%; max-height: 320px; border-radius: 8px; border: 1px solid var(--line); display: block; }
 
 /* 任務說明與整頁檢視（#41） */
