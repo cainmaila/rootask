@@ -1,6 +1,6 @@
 # 部署與 GitHub App 設定
 
-整個流程大約 15 分鐘。需要：GitHub 帳號、Cloudflare 帳號（免費方案即可）、Node.js 20 以上。
+整個流程大約 15 分鐘。需要：GitHub 帳號、Cloudflare 帳號（免費方案即可）、Node.js 22 以上。
 
 ## 1. 先部署一次 Worker，取得網址
 
