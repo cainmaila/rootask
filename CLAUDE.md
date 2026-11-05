@@ -22,6 +22,11 @@
 4. commit 訊息引用 issue：`#6 任務樹：支援移動到 ROOT`，完成用 `Closes #6`。
 5. 過程中發現的新工作，開新 issue 掛到對應 epic 底下，不要只記在對話裡。
 
+> **改狀態一律一次 PATCH 完成**（labels 整組＋state），不要先刪標籤再加標籤：本 repo 已啟用自動化，
+> 中間的空檔會被 bot 補上預設狀態（見 #32）。例：
+> `gh api -X PATCH repos/cainmaila/rootask/issues/N --input -` 搭配 `{"labels":[...,"status:done"],"state":"closed","state_reason":"completed"}`。
+> 本 repo 有轉換規則：不能從 `status:todo` 直接到 `status:done`，要先經過 `status:doing`。
+
 > 注意：這個開發環境的 `gh` 無法使用 GraphQL，只能用 REST（`gh api repos/cainmaila/rootask/...`）。
 > App 本身在正式環境會使用 GraphQL，不受此限。
 

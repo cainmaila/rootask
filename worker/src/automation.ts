@@ -135,7 +135,7 @@ class Repo {
   /** 從 issue 事件紀錄推算這次加上 `to` 之前的狀態 */
   async previousStatus(n: number, to: string, cfg: ProjectConfig): Promise<string | null> {
     const valid = new Set(cfg.statuses.map((s) => s.id));
-    type Ev = { event: string; label?: { name: string } };
+    type Ev = { event: string; label?: { name: string }; actor?: { type?: string } | null };
     const page1 = await this.gh.req<Ev[]>("GET", `${this.base}/issues/${n}/events?per_page=100`);
     let events = page1;
     if (page1.length === 100) {
@@ -149,7 +149,8 @@ class Repo {
     let last: string | null = null;
     for (const e of events) {
       const id = e.label?.name.startsWith(STATUS_PREFIX) ? e.label.name.slice(STATUS_PREFIX.length) : null;
-      if (e.event === "labeled" && id && valid.has(id) && id !== to) last = id;
+      // bot 自己補的標籤不算使用者的狀態（例如換標籤的空檔被補上的預設值）
+      if (e.event === "labeled" && id && valid.has(id) && id !== to && e.actor?.type !== "Bot") last = id;
     }
     return last;
   }
@@ -165,12 +166,24 @@ function repoFrom(gh: GhClient, ev: { repository: { name: string; owner: { login
 
 // ---------- issues 事件 ----------
 
-export async function onIssues(gh: GhClient, ev: IssuesEvent): Promise<void> {
+export interface Options {
+  /** 移除狀態標籤後等待多久再判斷（使用者換標籤通常是「先移除、再加上」兩個事件） */
+  settleMs?: number;
+  sleep?: (ms: number) => Promise<void>;
+}
+
+const defaultSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+export async function onIssues(gh: GhClient, ev: IssuesEvent, opts: Options = {}): Promise<void> {
   if (ev.issue.pull_request) return;
   if (!["opened", "labeled", "unlabeled", "closed", "reopened"].includes(ev.action)) return;
   const repo = repoFrom(gh, ev);
   const cfg = await repo.config();
   if (!cfg) return;
+
+  if (ev.action === "unlabeled" && ev.label?.name.startsWith(STATUS_PREFIX)) {
+    await (opts.sleep ?? defaultSleep)(opts.settleMs ?? 5000);
+  }
 
   // 事件內容可能已過時，以最新狀態為準
   const issue = await repo.issue(ev.issue.number);

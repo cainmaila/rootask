@@ -133,6 +133,51 @@ describe("#17 轉換規則", () => {
   });
 });
 
+describe("#32 換標籤的競態", () => {
+  beforeEach(() => {
+    fake.config = withRules;
+    fake.roles.set("alice", "admin");
+  });
+
+  it("先移除再加上：等待期間新標籤到了，就不補預設狀態", async () => {
+    fake.add(1, ["status:doing"]);
+    fake.userUnlabel(1, "status:doing");
+    let waited = 0;
+    await onIssues(gh, ev("unlabeled", 1, { label: { name: "status:doing" } }), {
+      sleep: async (ms) => {
+        waited = ms;
+        fake.userLabel(1, "status:done"); // 使用者在空檔加上新標籤
+      },
+    });
+    expect(waited).toBeGreaterThan(0);
+    expect(statusLabels(1)).toEqual(["status:done"]); // 沒有被補上 todo
+    await onIssues(gh, ev("labeled", 1, { label: { name: "status:done" } }));
+    expect(issue(1).state).toBe("closed"); // doing → done 允許
+    expect(fake.comments).toHaveLength(0);
+  });
+
+  it("推算上一個狀態時忽略 bot 補的預設值（實際發生的情況）", async () => {
+    fake.add(1, ["status:doing"]);
+    fake.userUnlabel(1, "status:doing");
+    // 舊版行為：bot 在空檔補了 todo
+    issue(1).labels.push("status:todo");
+    issue(1).events.push({ event: "labeled", label: { name: "status:todo" }, actor: { type: "Bot" } });
+    fake.userLabel(1, "status:done");
+    await onIssues(gh, ev("labeled", 1, { label: { name: "status:done" } }));
+    // 上一個「使用者的」狀態是 doing，doing → done 允許，不該被 todo → done 禁止規則擋下
+    expect(statusLabels(1)).toEqual(["status:done"]);
+    expect(issue(1).state).toBe("closed");
+    expect(fake.comments).toHaveLength(0);
+  });
+
+  it("真的只是移除狀態標籤：等待後仍補回", async () => {
+    fake.add(1, ["status:doing"]);
+    fake.userUnlabel(1, "status:doing");
+    await onIssues(gh, ev("unlabeled", 1, { label: { name: "status:doing" } }), { sleep: async () => {} });
+    expect(statusLabels(1)).toEqual(["status:todo"]);
+  });
+});
+
 describe("#18 父任務自動完成", () => {
   it("沒有核准關卡：子任務全完成，父任務直接完成並一路往上", async () => {
     fake.config = { ...DEFAULT_CONFIG, auto_complete_parent: true };

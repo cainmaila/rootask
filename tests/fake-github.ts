@@ -8,7 +8,7 @@ export interface FakeIssue {
   state_reason: string | null;
   labels: string[];
   parent: number | null;
-  events: { event: string; label?: { name: string } }[];
+  events: { event: string; label?: { name: string }; actor: { type: "User" | "Bot" } }[];
 }
 
 export class FakeGitHub {
@@ -25,7 +25,7 @@ export class FakeGitHub {
       state_reason: null,
       labels: [...labels],
       parent: null,
-      events: labels.map((l) => ({ event: "labeled", label: { name: l } })),
+      events: labels.map((l) => ({ event: "labeled", label: { name: l }, actor: { type: "User" as const } })),
       ...opts,
     };
     this.issues.set(number, i);
@@ -36,7 +36,14 @@ export class FakeGitHub {
   userLabel(n: number, label: string) {
     const i = this.issues.get(n)!;
     if (!i.labels.includes(label)) i.labels.push(label);
-    i.events.push({ event: "labeled", label: { name: label } });
+    i.events.push({ event: "labeled", label: { name: label }, actor: { type: "User" } });
+  }
+
+  /** 模擬使用者在 GitHub 網頁上移除標籤 */
+  userUnlabel(n: number, label: string) {
+    const i = this.issues.get(n)!;
+    i.labels = i.labels.filter((l) => l !== label);
+    i.events.push({ event: "unlabeled", label: { name: label }, actor: { type: "User" } });
   }
 
   private view(i: FakeIssue) {
@@ -83,7 +90,7 @@ export class FakeGitHub {
       if (method === "PATCH") {
         this.patches++;
         if (body.labels) {
-          for (const l of body.labels as string[]) if (!i.labels.includes(l)) i.events.push({ event: "labeled", label: { name: l } });
+          for (const l of body.labels as string[]) if (!i.labels.includes(l)) i.events.push({ event: "labeled", label: { name: l }, actor: { type: "Bot" } });
           i.labels = body.labels;
         }
         if (body.state) i.state = body.state;
