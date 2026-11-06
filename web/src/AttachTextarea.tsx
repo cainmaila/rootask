@@ -1,6 +1,7 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { attachmentMarkdown } from "../../shared/attachments";
 import { uploadAttachment } from "./attachments";
+import { Markdown } from "./Markdown";
 
 interface Props {
   owner: string;
@@ -23,6 +24,12 @@ interface Props {
 export function AttachTextarea(p: Props) {
   const ref = useRef<HTMLTextAreaElement>(null);
   const [uploading, setUploading] = useState<string | null>(null);
+  // 編輯／預覽切換（#44）。預覽時編輯框只是隱藏，游標位置會保留
+  const [mode, setMode] = useState<"edit" | "preview">("edit");
+  // 送出留言後內容被清空：回到編輯
+  useEffect(() => {
+    if (!p.value) setMode("edit");
+  }, [p.value]);
 
   function insert(md: string) {
     const el = ref.current;
@@ -53,7 +60,33 @@ export function AttachTextarea(p: Props) {
 
   return (
     <div className="attach-box">
+      <div className="md-tabs" role="tablist">
+        {(["edit", "preview"] as const).map((m) => (
+          <button
+            key={m}
+            type="button"
+            role="tab"
+            aria-selected={mode === m}
+            className={mode === m ? "on" : ""}
+            // 不搶走編輯框的焦點，避免觸發失焦自動儲存
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => {
+              setMode(m);
+              if (m === "edit") requestAnimationFrame(() => ref.current?.focus());
+            }}
+          >
+            {m === "edit" ? "編輯" : "預覽"}
+          </button>
+        ))}
+        <span className="md-hint muted small">支援 Markdown</span>
+      </div>
+      {mode === "preview" && (
+        <div className="md-preview" style={{ minHeight: `${(p.rows ?? 3) * 1.5 + 1}em` }}>
+          {p.value.trim() ? <Markdown text={p.value} /> : <span className="muted">沒有內容可以預覽</span>}
+        </div>
+      )}
       <textarea
+        hidden={mode === "preview"}
         ref={ref}
         rows={p.rows ?? 3}
         value={p.value}
