@@ -7,8 +7,8 @@
 
 這個專案本身就是「以 GitHub 為後端的任務管理」，所以開發過程也用同一套結構，順便吃自己的狗糧：
 
-- **Issues ＝ 任務**，用原生 sub-issues 拆成樹。#1（第一階段）、#2（第二階段）是 epic。
-- **Milestones ＝ 階段**。
+- **Issues ＝ 任務**，用原生 sub-issues 拆成樹。每個階段有一張 `type:epic`：#1 第一階段（已結案）、#2 第二階段、#45 第三階段、#36 第四階段。
+- **Milestones ＝ 階段**。「待排程」是已記錄但還沒排入階段的工作，Cain 沒指定時不要主動做。
 - **狀態用 `status:` 標籤**：`status:todo` → `status:doing` → `status:review` → `status:done`（done 時關閉 issue）。
   `status:review` 代表需要 Cain 確認。同一個 issue 只能有一個 `status:` 標籤。
 - **類型**：`type:epic`、`type:feature`、`type:spike`（需實測的風險）、`type:docs`、`type:decision`（等 Cain 決定，不要自己決定）。

@@ -265,7 +265,7 @@ async function proxy(req: Request, url: URL, env: Env): Promise<Response> {
   return new Response(upstream.body, { status: upstream.status, headers: out });
 }
 
-// ---------- Webhook（第二階段：狀態修正、轉換規則、父任務自動完成） ----------
+// ---------- Webhook：狀態修正、轉換規則、父任務自動完成（見 automation.ts） ----------
 
 async function webhook(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const body = await req.text();
