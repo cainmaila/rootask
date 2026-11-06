@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { getSession, type SessionInfo } from "./api";
 import { ProjectList } from "./ProjectList";
 import { ProjectView } from "./ProjectView";
+import { SyncIndicator } from "./SyncIndicator";
 
 type Route = { name: "projects" } | { name: "project"; owner: string; repo: string; task: number | null };
 
@@ -83,6 +84,7 @@ export function App() {
             {route.owner} / <b>{route.repo}</b>
           </span>
         )}
+        <SyncIndicator />
         <a className="link" href="/auth/logout">
           登出
         </a>

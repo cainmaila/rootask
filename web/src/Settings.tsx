@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { CATEGORY_LABEL, saveConfig, validateConfig, type StatusCategory, type StatusDef, type Transition } from "./config";
 import type { ProjectCtx } from "./ProjectView";
+import { track } from "./sync";
 import { setStatus, statusOf } from "./tasks";
 
 const CATEGORIES: StatusCategory[] = ["todo", "active", "done", "cancelled"];
@@ -32,36 +33,44 @@ export function Settings({ ctx, canAdmin }: { ctx: ProjectCtx; canAdmin: boolean
   }
 
   async function save() {
-    setBusy(true);
     setMsg(null);
+    let next: ReturnType<typeof validateConfig>;
     try {
       const ids = new Set(rows.map((r) => r.id));
-      const next = validateConfig({
+      next = validateConfig({
         ...cfg.config,
         statuses: rows,
         auto_complete_parent: autoParent,
         // 指到已刪除狀態的規則一併拿掉
         transitions: rules.filter((t) => (t.from === "*" || ids.has(t.from)) && ids.has(t.to)),
       });
-      const removed = cfg.config.statuses.filter((s) => !rows.some((r) => r.id === s.id));
-      const fallback = next.statuses.find((s) => s.category === "todo") ?? next.statuses[0];
-
-      // 1. 被刪除的狀態：任務改到 fallback 狀態
-      for (const s of removed) {
-        for (const t of usage(s.id)) await setStatus(owner, repo, t, fallback);
-      }
-      // 2. 類別改變：同步 open/closed
-      for (const s of next.statuses) {
-        const old = cfg.config.statuses.find((o) => o.id === s.id);
-        if (old && old.category !== s.category) {
-          for (const t of usage(s.id)) await setStatus(owner, repo, t, s);
-        }
-      }
-      await saveConfig(owner, repo, next, cfg.sha, "Rootask：更新狀態設定");
-      setMsg("已儲存");
-      await ctx.reload();
     } catch (e) {
-      setMsg(`儲存失敗：${(e as Error).message}`);
+      setMsg(`設定有誤：${(e as Error).message}`);
+      return;
+    }
+    setBusy(true);
+    try {
+      await track("儲存設定", async () => {
+        const removed = cfg.config.statuses.filter((s) => !rows.some((r) => r.id === s.id));
+        const fallback = next.statuses.find((s) => s.category === "todo") ?? next.statuses[0];
+
+        // 1. 被刪除的狀態：任務改到 fallback 狀態
+        for (const s of removed) {
+          for (const t of usage(s.id)) await setStatus(owner, repo, t, fallback);
+        }
+        // 2. 類別改變：同步 open/closed
+        for (const s of next.statuses) {
+          const old = cfg.config.statuses.find((o) => o.id === s.id);
+          if (old && old.category !== s.category) {
+            for (const t of usage(s.id)) await setStatus(owner, repo, t, s);
+          }
+        }
+        await saveConfig(owner, repo, next, cfg.sha, "Rootask：更新狀態設定");
+        await ctx.reload();
+      });
+      setMsg("已儲存");
+    } catch {
+      /* 頂端列顯示錯誤，可重試 */
     } finally {
       setBusy(false);
     }

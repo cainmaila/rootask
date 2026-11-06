@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { ProjectCtx } from "./ProjectView";
 import { isClosing } from "./config";
 import { isOverdue, todayLocal } from "../../shared/meta";
+import { track, useSync } from "./sync";
 import { MAX_CHILDREN, MAX_DEPTH, createTask, depthOf, statusOf } from "./tasks";
 
 /** 拖曳排序（#42）的共用狀態，由 ProjectView 提供 */
@@ -44,25 +45,37 @@ export function TaskNode({ n, ctx, expanded, toggle, selected, select, drag }: P
   async function addChild() {
     if (!title.trim()) return;
     setBusy(true);
+    const t = title.trim();
     try {
-      await createTask(ctx.owner, ctx.repo, title.trim(), task, ctx.cfg.config);
+      await track(
+        "新增子任務",
+        async () => {
+          await createTask(ctx.owner, ctx.repo, t, task, ctx.cfg.config);
+          await ctx.reload();
+        },
+        [n],
+      );
       setTitle("");
       setAdding(false);
       if (!open) toggle(n);
-      await ctx.reload();
+    } catch {
+      /* 頂端列顯示錯誤，保留輸入內容 */
     } finally {
       setBusy(false);
     }
   }
 
+  // 同步中的任務：淡化並顯示轉圈，暫時不能拖曳（#53）
+  const syncing = useSync().tasks.has(n);
   const isOver = drag.over?.n === n && drag.dragging !== null && drag.dragging !== n;
   const dropClass = isOver ? `drop-${drag.over!.position}` : "";
 
   return (
     <li className={drag.dragging === n ? "dragging" : ""}>
       <div
-        className={`node ${selected === n ? "sel" : ""} cat-${status.category} ${dropClass}`}
-        draggable
+        className={`node ${selected === n ? "sel" : ""} cat-${status.category} ${dropClass} ${syncing ? "syncing" : ""}`}
+        aria-busy={syncing}
+        draggable={!syncing}
         onDragStart={(e) => {
           e.dataTransfer.effectAllowed = "move";
           e.dataTransfer.setData("text/plain", `#${n}`);
@@ -119,6 +132,7 @@ export function TaskNode({ n, ctx, expanded, toggle, selected, select, drag }: P
                 {task.meta.due.slice(5).replace("-", "/")}
               </span>
             )}
+            {syncing && <span className="spinner" title="同步中" aria-label="同步中" />}
             <span className={`pill cat-${status.category}`}>{status.name}</span>
             {kids.length > 0 && (
               <span className="muted small">

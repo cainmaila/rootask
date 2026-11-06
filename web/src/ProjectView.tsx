@@ -4,6 +4,7 @@ import { Settings } from "./Settings";
 import { TaskDetail } from "./TaskDetail";
 import { TaskNode, type DragCtx } from "./TaskNode";
 import { gh } from "./api";
+import { track } from "./sync";
 import {
   createTask,
   isDescendant,
@@ -41,7 +42,6 @@ export function ProjectView({ owner, repo, fullTask = null }: { owner: string; r
   const [busy, setBusy] = useState(false);
   const [dragging, setDragging] = useState<number | null>(null);
   const [over, setOver] = useState<DragCtx["over"]>(null);
-  const [moveMsg, setMoveMsg] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     try {
@@ -91,13 +91,14 @@ export function ProjectView({ owner, repo, fullTask = null }: { owner: string; r
       const moving = dragging;
       setDragging(null);
       if (moving === null) return;
-      setMoveMsg("調整順序中…");
-      reorderTask(owner, repo, ctx.tree, moving, target, position)
-        .then(async (changed) => {
-          if (changed) await reload();
-          setMoveMsg(null);
-        })
-        .catch((e: Error) => setMoveMsg(`調整順序失敗：${e.message}`));
+      const tree = ctx.tree;
+      void track(
+        "調整順序",
+        async () => {
+          if (await reorderTask(owner, repo, tree, moving, target, position)) await reload();
+        },
+        [moving],
+      ).catch(() => {});
     },
   };
 
@@ -142,10 +143,15 @@ export function ProjectView({ owner, repo, fullTask = null }: { owner: string; r
     const title = newTitle.trim();
     if (!title) return;
     setBusy(true);
+    const config = ctx!.cfg.config;
     try {
-      await createTask(owner, repo, title, null, ctx!.cfg.config);
+      await track("新增任務", async () => {
+        await createTask(owner, repo, title, null, config);
+        await reload();
+      });
       setNewTitle("");
-      await reload();
+    } catch {
+      /* 頂端列顯示錯誤，保留輸入內容 */
     } finally {
       setBusy(false);
     }
@@ -153,9 +159,14 @@ export function ProjectView({ owner, repo, fullTask = null }: { owner: string; r
 
   async function initProject() {
     setBusy(true);
+    const config = ctx!.cfg.config;
     try {
-      await saveConfig(owner, repo, ctx!.cfg.config, null, "Rootask：初始化專案設定");
-      await reload();
+      await track("初始化專案", async () => {
+        await saveConfig(owner, repo, config, null, "Rootask：初始化專案設定");
+        await reload();
+      });
+    } catch {
+      /* 頂端列顯示錯誤 */
     } finally {
       setBusy(false);
     }
@@ -208,7 +219,6 @@ export function ProjectView({ owner, repo, fullTask = null }: { owner: string; r
               </button>
             </form>
             {roots.length === 0 && <p className="muted empty">還沒有任務，從上面新增第一個吧。</p>}
-            {moveMsg && <p className="banner small">{moveMsg}</p>}
             <ul className="nodes">
               {roots.map((n) => (
                 <TaskNode

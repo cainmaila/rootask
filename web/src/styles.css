@@ -253,3 +253,21 @@ li.dragging > .node { opacity: 0.4; }
   border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px;
   background: var(--surface); overflow-wrap: anywhere; max-height: 60vh; overflow: auto;
 }
+
+/* 同步狀態（#53） */
+.sync { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; white-space: nowrap; margin-left: auto; }
+.sync + .link { margin-left: 12px; }
+.sync-busy { color: var(--muted); }
+.sync-done { color: var(--c-done); }
+.sync-error { color: var(--danger); min-width: 0; }
+.sync-error .sync-msg { overflow: hidden; text-overflow: ellipsis; max-width: 40vw; }
+.spinner {
+  display: inline-block; width: 12px; height: 12px; flex-shrink: 0;
+  border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%;
+  animation: rt-spin 0.7s linear infinite; color: var(--accent);
+}
+@keyframes rt-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2s; } }
+.node.syncing { opacity: 0.55; }
+.node.syncing .node-main { cursor: progress; }
+@media (max-width: 600px) { .crumb { display: none; } .sync-error .sync-msg { max-width: 45vw; } }
