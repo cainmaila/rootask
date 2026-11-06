@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { CATEGORY_LABEL, saveConfig, validateConfig, type StatusCategory, type StatusDef, type Transition } from "./config";
 import type { ProjectCtx } from "./ProjectView";
 import { track } from "./sync";
-import { setStatus, statusOf } from "./tasks";
+import { loadTree, setStatus, statusOf, type Task } from "./tasks";
 
 const CATEGORIES: StatusCategory[] = ["todo", "active", "done", "cancelled"];
 
@@ -15,7 +15,23 @@ export function Settings({ ctx, canAdmin }: { ctx: ProjectCtx; canAdmin: boolean
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
-  const tasks = [...tree.byNumber.values()];
+  // 統計與搬移狀態要看「所有」任務；任務樹隱藏已完成時，這裡另外載入完整清單（#46）
+  const [allTasks, setAllTasks] = useState<Task[] | null>(tree.includeClosed ? [...tree.byNumber.values()] : null);
+  useEffect(() => {
+    if (tree.includeClosed) {
+      setAllTasks([...tree.byNumber.values()]);
+      return;
+    }
+    let alive = true;
+    loadTree(owner, repo, { includeClosed: true }).then(
+      (t) => alive && setAllTasks([...t.byNumber.values()]),
+      (e: Error) => alive && setMsg(`讀取任務失敗：${e.message}`),
+    );
+    return () => {
+      alive = false;
+    };
+  }, [owner, repo, tree]);
+  const tasks = allTasks ?? [];
   const usage = (id: string) => tasks.filter((t) => statusOf(t, cfg.config).id === id);
 
   function patch(i: number, p: Partial<StatusDef>) {
@@ -128,7 +144,7 @@ export function Settings({ ctx, canAdmin }: { ctx: ProjectCtx; canAdmin: boolean
                   ))}
                 </select>
               </td>
-              <td className="muted">{usage(s.id).length}</td>
+              <td className="muted">{allTasks ? usage(s.id).length : "…"}</td>
               <td>
                 <button className="icon" title="刪除" disabled={rows.length <= 1} onClick={() => setRows((r) => r.filter((_, j) => j !== i))}>
                   🗑
@@ -227,8 +243,8 @@ export function Settings({ ctx, canAdmin }: { ctx: ProjectCtx; canAdmin: boolean
       </p>
 
       <div className="actions">
-        <button className="btn primary" disabled={busy} onClick={save}>
-          {busy ? "儲存中…" : "儲存設定"}
+        <button className="btn primary" disabled={busy || !allTasks} onClick={save}>
+          {busy ? "儲存中…" : !allTasks ? "讀取任務中…" : "儲存設定"}
         </button>
         {msg && <span className="small">{msg}</span>}
       </div>

@@ -271,3 +271,6 @@ li.dragging > .node { opacity: 0.4; }
 .node.syncing { opacity: 0.55; }
 .node.syncing .node-main { cursor: progress; }
 @media (max-width: 600px) { .crumb { display: none; } .sync-error .sync-msg { max-width: 45vw; } }
+
+/* 隱藏已完成（#46） */
+.tree-bar { display: flex; align-items: center; gap: 8px; margin: -2px 0 6px; color: var(--muted); }

@@ -32,15 +32,14 @@ export function TaskNode({ n, ctx, expanded, toggle, selected, select, drag }: P
   const kids = ctx.tree.children.get(n) ?? [];
   const open = expanded.has(n);
   const status = statusOf(task, ctx.cfg.config);
-  const doneKids = kids.filter((k) => {
-    const c = statusOf(ctx.tree.byNumber.get(k)!, ctx.cfg.config).category;
-    return c === "done" || c === "cancelled";
-  }).length;
+  // 子任務數用 GitHub 的統計：隱藏已完成時，沒載入的已完成子任務也要算進去（#46）
+  const kidTotal = Math.max(task.childTotal, kids.length);
+  const kidDone = task.childCompleted;
 
   const [adding, setAdding] = useState(false);
   const [title, setTitle] = useState("");
   const [busy, setBusy] = useState(false);
-  const canAddChild = depthOf(ctx.tree, n) < MAX_DEPTH && kids.length < MAX_CHILDREN;
+  const canAddChild = depthOf(ctx.tree, n) < MAX_DEPTH && kidTotal < MAX_CHILDREN;
 
   async function addChild() {
     if (!title.trim()) return;
@@ -134,9 +133,9 @@ export function TaskNode({ n, ctx, expanded, toggle, selected, select, drag }: P
             )}
             {syncing && <span className="spinner" title="同步中" aria-label="同步中" />}
             <span className={`pill cat-${status.category}`}>{status.name}</span>
-            {kids.length > 0 && (
-              <span className="muted small">
-                {doneKids}/{kids.length}
+            {kidTotal > 0 && (
+              <span className="muted small" title={`已完成 ${kidDone}／共 ${kidTotal} 個子任務`}>
+                {kidDone}/{kidTotal}
               </span>
             )}
             {task.assignees.slice(0, 3).map((a) => (

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { loadConfig, saveConfig, type LoadedConfig } from "./config";
 import { Settings } from "./Settings";
 import { TaskDetail } from "./TaskDetail";
@@ -14,19 +14,36 @@ import {
   myPermission,
   reorderTask,
   type Person,
-  type TaskTree,
+  type LoadedTree,
 } from "./tasks";
 
 export interface ProjectCtx {
   owner: string;
   repo: string;
   cfg: LoadedConfig;
-  tree: TaskTree;
+  tree: LoadedTree;
   people: Person[];
   permission: string;
   /** 目前登入者的 GitHub 帳號 */
   me: string;
   reload: () => Promise<void>;
+}
+
+// 「顯示已完成」是每位使用者自己的偏好，記在瀏覽器（#46）
+const showDoneKey = (owner: string, repo: string) => `rootask:show-done:${owner}/${repo}`;
+function readShowDone(owner: string, repo: string): boolean {
+  try {
+    return localStorage.getItem(showDoneKey(owner, repo)) === "1";
+  } catch {
+    return false;
+  }
+}
+function writeShowDone(owner: string, repo: string, v: boolean) {
+  try {
+    localStorage.setItem(showDoneKey(owner, repo), v ? "1" : "0");
+  } catch {
+    /* 無痕模式等情況存不了，不影響使用 */
+  }
 }
 
 const projectHash = (owner: string, repo: string) => `#/p/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
@@ -42,12 +59,20 @@ export function ProjectView({ owner, repo, fullTask = null }: { owner: string; r
   const [busy, setBusy] = useState(false);
   const [dragging, setDragging] = useState<number | null>(null);
   const [over, setOver] = useState<DragCtx["over"]>(null);
+  const [showDone, setShowDone] = useState(() => readShowDone(owner, repo));
+  const [loadingDone, setLoadingDone] = useState(false);
+
+  // 正在看的任務一定要載入，即使已完成（剛改成完成時面板不會突然消失）
+  const pinned = useRef<number[]>([]);
+  pinned.current = [selected, fullTask].filter((x): x is number => x !== null);
+  const showDoneRef = useRef(showDone);
+  showDoneRef.current = showDone;
 
   const reload = useCallback(async () => {
     try {
       const [cfg, tree, people, permission, user] = await Promise.all([
         loadConfig(owner, repo),
-        loadTree(owner, repo),
+        loadTree(owner, repo, { includeClosed: showDoneRef.current, pin: pinned.current }),
         listAssignable(owner, repo),
         myPermission(owner, repo),
         gh<{ login: string }>("/user"),
@@ -58,6 +83,16 @@ export function ProjectView({ owner, repo, fullTask = null }: { owner: string; r
       setError((e as Error).message);
     }
   }, [owner, repo]);
+
+  async function toggleShowDone() {
+    const next = !showDone;
+    setShowDone(next);
+    showDoneRef.current = next;
+    writeShowDone(owner, repo, next);
+    setLoadingDone(true);
+    await reload();
+    setLoadingDone(false);
+  }
 
   useEffect(() => {
     void reload();
@@ -218,7 +253,18 @@ export function ProjectView({ owner, repo, fullTask = null }: { owner: string; r
                 新增
               </button>
             </form>
-            {roots.length === 0 && <p className="muted empty">還沒有任務，從上面新增第一個吧。</p>}
+            <div className="tree-bar">
+              <label className="check small">
+                <input type="checkbox" checked={showDone} disabled={loadingDone} onChange={() => void toggleShowDone()} />
+                顯示已完成{ctx.tree.closedCount > 0 && `（${ctx.tree.closedCount}）`}
+              </label>
+              {loadingDone && <span className="spinner" aria-label="載入中" />}
+            </div>
+            {roots.length === 0 && (
+              <p className="muted empty">
+                {!showDone && ctx.tree.closedCount > 0 ? "目前沒有未完成的任務 🎉" : "還沒有任務，從上面新增第一個吧。"}
+              </p>
+            )}
             <ul className="nodes">
               {roots.map((n) => (
                 <TaskNode

@@ -30,6 +30,9 @@ export interface Task {
   parent: number | null;
   /** GitHub 原生的子任務順序 */
   childOrder: number[];
+  /** 子任務總數與已完成數（GitHub 統計，包含沒有載入的已關閉子任務） */
+  childTotal: number;
+  childCompleted: number;
   updatedAt: string;
 }
 
@@ -38,72 +41,128 @@ export interface TaskTree {
   children: Map<number | null, number[]>; // null ＝ ROOT
 }
 
-const TREE_QUERY = `
-query($owner: String!, $name: String!, $after: String) {
-  repository(owner: $owner, name: $name) {
-    issues(first: 100, after: $after, orderBy: {field: CREATED_AT, direction: ASC}) {
-      pageInfo { hasNextPage endCursor }
-      nodes {
-        id databaseId number title body state stateReason updatedAt closedAt
-        labels(first: 30) { nodes { name } }
-        assignees(first: 10) { nodes { login avatarUrl } }
-        parent { number }
-        subIssues(first: 100) { nodes { number } }
-      }
-    }
-  }
+const ISSUE_FIELDS = `
+fragment T on Issue {
+  id databaseId number title body state stateReason updatedAt closedAt
+  labels(first: 30) { nodes { name } }
+  assignees(first: 10) { nodes { login avatarUrl } }
+  parent { number }
+  subIssues(first: 100) { nodes { number } }
+  subIssuesSummary { total completed }
 }`;
+
+const TREE_QUERY = `
+query($owner: String!, $name: String!, $after: String, $states: [IssueState!]) {
+  repository(owner: $owner, name: $name) {
+    issues(first: 100, after: $after, states: $states, orderBy: {field: CREATED_AT, direction: ASC}) {
+      pageInfo { hasNextPage endCursor }
+      nodes { ...T }
+    }
+    closed: issues(states: CLOSED) { totalCount }
+  }
+}
+${ISSUE_FIELDS}`;
+
+interface IssueNode {
+  id: string;
+  databaseId: number;
+  number: number;
+  title: string;
+  body: string;
+  state: "OPEN" | "CLOSED";
+  stateReason: string | null;
+  updatedAt: string;
+  closedAt: string | null;
+  labels: { nodes: { name: string }[] };
+  assignees: { nodes: Person[] };
+  parent: { number: number } | null;
+  subIssues: { nodes: { number: number }[] };
+  subIssuesSummary: { total: number; completed: number };
+}
 
 interface TreeQueryResult {
   repository: {
-    issues: {
-      pageInfo: { hasNextPage: boolean; endCursor: string | null };
-      nodes: {
-        id: string;
-        databaseId: number;
-        number: number;
-        title: string;
-        body: string;
-        state: "OPEN" | "CLOSED";
-        stateReason: string | null;
-        updatedAt: string;
-        closedAt: string | null;
-        labels: { nodes: { name: string }[] };
-        assignees: { nodes: Person[] };
-        parent: { number: number } | null;
-        subIssues: { nodes: { number: number }[] };
-      }[];
-    };
+    issues: { pageInfo: { hasNextPage: boolean; endCursor: string | null }; nodes: IssueNode[] };
+    closed: { totalCount: number };
   };
 }
 
-export async function loadTree(owner: string, repo: string): Promise<TaskTree> {
+function toTask(n: IssueNode): Task {
+  const { text, meta } = parseMeta(n.body);
+  return {
+    id: n.id,
+    databaseId: n.databaseId,
+    number: n.number,
+    title: n.title,
+    body: text,
+    meta,
+    closedAt: n.closedAt,
+    state: n.state,
+    stateReason: n.stateReason,
+    labels: n.labels.nodes.map((l) => l.name),
+    assignees: n.assignees.nodes,
+    parent: n.parent?.number ?? null,
+    childOrder: n.subIssues.nodes.map((c) => c.number),
+    childTotal: n.subIssuesSummary.total,
+    childCompleted: n.subIssuesSummary.completed,
+    updatedAt: n.updatedAt,
+  };
+}
+
+/** 依編號一次抓多張 issue（用別名組成單一查詢） */
+async function loadByNumbers(owner: string, repo: string, numbers: number[]): Promise<Task[]> {
+  if (numbers.length === 0) return [];
+  const fields = numbers.map((n) => `i${n}: issue(number: ${n}) { ...T }`).join("\n");
+  const q = `query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { ${fields} } }\n${ISSUE_FIELDS}`;
+  const r = await graphql<{ repository: Record<string, IssueNode | null> }>(q, { owner, name: repo });
+  return Object.values(r.repository)
+    .filter((n): n is IssueNode => !!n)
+    .map(toTask);
+}
+
+export interface LoadOptions {
+  /** 也載入已關閉的任務（#46：預設不載入） */
+  includeClosed?: boolean;
+  /** 一定要載入的任務（例如正在看的那張），即使已關閉 */
+  pin?: number[];
+}
+
+export interface LoadedTree extends TaskTree {
+  /** repo 裡已關閉的任務總數 */
+  closedCount: number;
+  includeClosed: boolean;
+}
+
+export async function loadTree(owner: string, repo: string, opts: LoadOptions = {}): Promise<LoadedTree> {
+  const includeClosed = !!opts.includeClosed;
   const tasks: Task[] = [];
+  let closedCount = 0;
   let after: string | null = null;
   do {
-    const r: TreeQueryResult = await graphql<TreeQueryResult>(TREE_QUERY, { owner, name: repo, after });
-    for (const n of r.repository.issues.nodes) {
-      const { text, meta } = parseMeta(n.body);
-      tasks.push({
-        id: n.id,
-        databaseId: n.databaseId,
-        number: n.number,
-        title: n.title,
-        body: text,
-        meta,
-        closedAt: n.closedAt,
-        state: n.state,
-        stateReason: n.stateReason,
-        labels: n.labels.nodes.map((l) => l.name),
-        assignees: n.assignees.nodes,
-        parent: n.parent?.number ?? null,
-        childOrder: n.subIssues.nodes.map((c) => c.number),
-        updatedAt: n.updatedAt,
-      });
-    }
+    const r: TreeQueryResult = await graphql<TreeQueryResult>(TREE_QUERY, {
+      owner,
+      name: repo,
+      after,
+      states: includeClosed ? null : ["OPEN"],
+    });
+    tasks.push(...r.repository.issues.nodes.map(toTask));
+    closedCount = r.repository.closed.totalCount;
     after = r.repository.issues.pageInfo.hasNextPage ? r.repository.issues.pageInfo.endCursor : null;
   } while (after);
-  return buildTree(tasks);
+
+  // 補上沒載入的：指定要看的任務，以及未完成任務的已關閉上層（樹才不會斷掉）
+  const have = new Set(tasks.map((t) => t.number));
+  for (let round = 0; round <= MAX_DEPTH + 1; round++) {
+    const missingParents = tasks.map((t) => t.parent).filter((p): p is number => p !== null && !have.has(p));
+    const pins = round === 0 ? (opts.pin ?? []).filter((n) => !have.has(n)) : [];
+    const want = [...new Set([...pins, ...missingParents])];
+    if (want.length === 0) break;
+    const more = await loadByNumbers(owner, repo, want);
+    for (const t of more) have.add(t.number);
+    for (const n of want) have.add(n); // 抓不到的（例如已刪除）也不再重試
+    tasks.push(...more);
+  }
+  return { ...buildTree(tasks), closedCount, includeClosed };
 }
 
 export function buildTree(tasks: Task[]): TaskTree {
@@ -215,7 +274,8 @@ export function moveBlockReason(tree: TaskTree, n: number, newParent: number | n
   if (newParent === null) return null;
   if (newParent === n || isDescendant(tree, newParent, n)) return "不能移到自己或自己的子任務底下";
   if (depthOf(tree, newParent) + heightOf(tree, n) > MAX_DEPTH) return `移動後會超過 ${MAX_DEPTH} 層`;
-  if ((tree.children.get(newParent) ?? []).length >= MAX_CHILDREN) return `每個任務最多 ${MAX_CHILDREN} 個子任務`;
+  const total = Math.max(tree.byNumber.get(newParent)?.childTotal ?? 0, (tree.children.get(newParent) ?? []).length);
+  if (total >= MAX_CHILDREN) return `每個任務最多 ${MAX_CHILDREN} 個子任務`;
   return null;
 }
 
