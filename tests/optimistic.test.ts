@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { buildTree, planReorder, type LoadedTree, type Task } from "../web/src/tasks";
 import {
   applyReorder,
+  changedIssues,
+  structureChanges,
   newlyClosed,
   patchTask,
   reorderAffects,
@@ -147,5 +149,35 @@ describe("樂觀更新（#48）", () => {
     const next = replaceTasks({ ...t, closedCount: 3 }, [hidden]);
     expect(next.closedCount).toBe(3);
     expect(next.byNumber.has(9)).toBe(true);
+  });
+});
+
+describe("定時檢查（#49）", () => {
+  const stamp = (number: number, updated_at: string, state: "open" | "closed" = "open") => ({ number, updated_at, state });
+  it("只挑出和畫面上不一樣的", () => {
+    const t = base(); // 所有任務 updatedAt 都是 2026-11-07T00:00:00Z
+    const same = "2026-11-07T00:00:00Z";
+    const later = "2026-11-07T01:00:00Z";
+    expect(
+      changedIssues(t, [stamp(2, later), stamp(3, same), stamp(9, later), stamp(10, later, "closed"), stamp(4, later, "closed")]),
+    ).toEqual([2, 9, 4]);
+    // 顯示已完成時，沒載入的已關閉任務也要讀
+    expect(changedIssues({ ...t, includeClosed: true }, [stamp(10, later, "closed")])).toEqual([10]);
+  });
+});
+
+describe("定時檢查：任務樹結構（#49）", () => {
+  const ev = (id: number, event: string, number: number) => ({ id, event, issue: { number } });
+  it("第一次只記下最新的事件", () => {
+    expect(structureChanges([ev(5, "sub_issue_added", 2)], null)).toEqual({ numbers: [], lastId: 5 });
+    // repo 還沒有任何事件：從 0 開始，下一次的新事件才不會又被當成第一次
+    const first = structureChanges([], null);
+    expect(first).toEqual({ numbers: [], lastId: 0 });
+    expect(structureChanges([ev(1, "parent_issue_added", 7)], first.lastId).numbers).toEqual([7]);
+  });
+  it("之後挑出新的換父任務事件，其他事件不管", () => {
+    const events = [ev(9, "parent_issue_added", 5), ev(8, "sub_issue_added", 2), ev(7, "labeled", 3), ev(4, "sub_issue_removed", 1)];
+    expect(structureChanges(events, 5)).toEqual({ numbers: [5, 2], lastId: 9 });
+    expect(structureChanges([], 9)).toEqual({ numbers: [], lastId: 9 });
   });
 });

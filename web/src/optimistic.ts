@@ -2,7 +2,7 @@
 // 這裡都是純函式：輸入目前的樹，回傳新的樹，不會改到原本的物件。
 import { STATUS_PREFIX, type StatusDef } from "./config";
 import type { MovePlan } from "../../shared/order";
-import { buildTree, orderable, type LoadedTree, type Task } from "./tasks";
+import { buildTree, orderable, type IssueEvent, type IssueStamp, type LoadedTree, type Task } from "./tasks";
 
 const isClosed = (t: Task | undefined) => t?.state === "CLOSED";
 
@@ -120,4 +120,35 @@ export function newlyClosed(prev: LoadedTree, next: LoadedTree): number[] {
     if (t.state === "CLOSED" && prev.byNumber.get(t.number)?.state === "OPEN") out.push(t.number);
   }
   return out;
+}
+
+/**
+ * 定時檢查（#49）：哪些 issue 和畫面上的不一樣、要重新讀取。
+ * - 已載入的：更新時間不同就要讀
+ * - 沒載入的：開著的是別人新開的任務要讀；已關閉的只在「顯示已完成」時讀
+ */
+export function changedIssues(tree: LoadedTree, stamps: IssueStamp[]): number[] {
+  return stamps
+    .filter((s) => {
+      const t = tree.byNumber.get(s.number);
+      if (t) return t.updatedAt !== s.updated_at;
+      return s.state === "open" || tree.includeClosed;
+    })
+    .map((s) => s.number);
+}
+
+const STRUCTURE_EVENTS = new Set(["sub_issue_added", "sub_issue_removed", "parent_issue_added", "parent_issue_removed"]);
+
+/**
+ * 定時檢查（#49）：比 lastId 新的事件裡，任務樹結構變了（換父任務）的 issue。
+ * lastId 為 null 表示第一次檢查，只記下目前最新的事件，不必重讀（剛載入的資料已經是最新的）。
+ */
+export function structureChanges(events: IssueEvent[], lastId: number | null): { numbers: number[]; lastId: number } {
+  const newest = events.reduce((m, e) => Math.max(m, e.id), lastId ?? 0);
+  // 第一次檢查：記下目前最新的（一個事件都沒有就從 0 開始）
+  if (lastId === null) return { numbers: [], lastId: newest };
+  const numbers = events
+    .filter((e) => e.id > lastId && STRUCTURE_EVENTS.has(e.event) && e.issue)
+    .map((e) => e.issue!.number);
+  return { numbers: [...new Set(numbers)], lastId: newest };
 }

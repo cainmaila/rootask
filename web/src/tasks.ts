@@ -1,4 +1,4 @@
-import { gh, graphql } from "./api";
+import { ApiError, gh, graphql } from "./api";
 import { STATUS_PREFIX, isClosing, statusFromLabels, type ProjectConfig, type StatusDef } from "./config";
 import { mergeMeta, parseMeta, writeMeta, type TaskMeta } from "../../shared/meta";
 import { planMove, sortRoots, type DropPosition, type MovePlan } from "../../shared/order";
@@ -449,4 +449,64 @@ export interface Abilities {
 export function abilitiesOf(permission: string): Abilities {
   const edit = ["admin", "maintain", "write"].includes(permission);
   return { edit, triage: edit || permission === "triage" };
+}
+
+// ---------- 多人同步（#49） ----------
+
+export interface IssueStamp {
+  number: number;
+  updated_at: string;
+  state: "open" | "closed";
+}
+
+/** 每次檢查最多看幾張最近更新的 issue；全部都變了就整棵重讀 */
+export const POLL_PAGE = 50;
+
+/** 條件式 GET：沒變時（304）回傳 null，不扣 GitHub 額度 */
+async function conditionalGet<T>(path: string, etag: string | null): Promise<{ etag: string | null; data: T } | null> {
+  const res = await fetch(`/api/gh${path}`, {
+    credentials: "same-origin",
+    cache: "no-store",
+    headers: etag ? { "If-None-Match": etag } : {},
+  });
+  if (res.status === 304) return null;
+  if (res.status === 401) window.dispatchEvent(new Event("rootask:logged-out"));
+  if (!res.ok) throw new ApiError(res.status, res.statusText);
+  return { etag: res.headers.get("ETag"), data: (await res.json()) as T };
+}
+
+/** 最近更新的 issue（不含 PR）：內容、狀態、留言、新開的任務都會改變更新時間 */
+export async function pollIssues(
+  owner: string,
+  repo: string,
+  etag: string | null,
+): Promise<{ etag: string | null; stamps: IssueStamp[] } | null> {
+  const r = await conditionalGet<(IssueStamp & { pull_request?: unknown })[]>(
+    `/repos/${owner}/${repo}/issues?state=all&sort=updated&direction=desc&per_page=${POLL_PAGE}`,
+    etag,
+  );
+  if (!r) return null;
+  return {
+    etag: r.etag,
+    stamps: r.data.filter((i) => !i.pull_request).map(({ number, updated_at, state }) => ({ number, updated_at, state })),
+  };
+}
+
+export interface IssueEvent {
+  id: number;
+  event: string;
+  issue: { number: number } | null;
+}
+
+/**
+ * repo 的 issue 事件：換父任務（新增／移除 sub-issue）在 GitHub 上不會改變 issue 的更新時間，
+ * 只會留下事件，所以另外檢查（#49 實測）。同一個父任務底下調整順序連事件都沒有，要等回到前景整頁重讀。
+ */
+export async function pollEvents(
+  owner: string,
+  repo: string,
+  etag: string | null,
+): Promise<{ etag: string | null; events: IssueEvent[] } | null> {
+  const r = await conditionalGet<IssueEvent[]>(`/repos/${owner}/${repo}/issues/events?per_page=${POLL_PAGE}`, etag);
+  return r && { etag: r.etag, events: r.data };
 }

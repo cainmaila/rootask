@@ -59,6 +59,7 @@ export class FakeGitHub {
     this.files = new Map();
     this.nextId = 5000;
     this.nextComment = 9000;
+    this.nextEvent = 1;
     /** @type {Map<string, any>} */
     this.repos = new Map();
     this.#seedWebsite();
@@ -171,6 +172,19 @@ export class FakeGitHub {
     if (o.parent) this.#attach(r, o.parent, number);
     if (!silent) r.pushed_at = iso(Date.now());
     return number;
+  }
+
+  /** 子任務變動的事件：和真實 GitHub 一樣只記在 events，不更新 updated_at（#49 實測） */
+  #event(issue, event) {
+    if (!issue) return;
+    issue.events.push({ id: this.nextEvent++, event, created_at: iso(Date.now()), actor: { login: this.me.login, type: "User" } });
+  }
+
+  /** 有變動的 issue 更新 updated_at（列表的 ETag 跟著變，#49） */
+  #touch(r, ...issues) {
+    const now = iso(Date.now());
+    for (const i of issues) if (i) i.updated_at = now;
+    r.pushed_at = now;
   }
 
   #attach(r, parent, child) {
@@ -352,6 +366,37 @@ export class FakeGitHub {
         return { status: 200, json: { content: { sha: r.configSha } } };
       }
     }
+    if (rest === "/issues/events" && method === "GET") {
+      // repo 的 issue 事件（新的在前），支援 ETag（#49：偵測別人換父任務）
+      const per = Math.min(Number(query.get("per_page") ?? 30), 100);
+      const all = [...r.issues.values()]
+        .flatMap((i) => i.events.filter((e) => e.id).map((e) => ({ ...e, issue: { number: i.number } })))
+        .sort((a, b) => b.id - a.id)
+        .slice(0, per);
+      const etag = `W/"ev-${all[0]?.id ?? 0}-${all.length}"`;
+      if (req.headers?.["if-none-match"] === etag) {
+        this.requests[this.requests.length - 1] += " → 304";
+        return { status: 304, headers: { ETag: etag } };
+      }
+      return { status: 200, json: all, headers: { ETag: etag } };
+    }
+    if (rest === "/issues" && method === "GET") {
+      // 依更新時間排序的列表，支援 ETag 條件式請求：沒變動時回 304（#49）
+      const per = Math.min(Number(query.get("per_page") ?? 30), 100);
+      const state = query.get("state") ?? "open";
+      const list = [...r.issues.values()]
+        .filter((i) => state === "all" || i.state === state)
+        .sort((a, b) => b.updated_at.localeCompare(a.updated_at) || b.number - a.number)
+        .slice(0, per);
+      let h = 5381;
+      for (const ch of list.map((i) => `${i.number}@${i.updated_at}@${i.state}`).join(",")) h = ((h << 5) + h + ch.charCodeAt(0)) | 0;
+      const etag = `W/"${(h >>> 0).toString(16)}"`;
+      if (req.headers?.["if-none-match"] === etag) {
+        this.requests[this.requests.length - 1] += " → 304";
+        return { status: 304, headers: { ETag: etag } };
+      }
+      return { status: 200, json: list.map((i) => this.#rest(i)), headers: { ETag: etag } };
+    }
     if (rest === "/issues" && method === "POST") {
       // 能讀就能開 issue；沒有 triage 權限時 GitHub 會忽略標籤
       if (!req.body.title?.trim()) return { status: 422, json: { message: "標題不能是空的" } };
@@ -386,7 +431,7 @@ export class FakeGitHub {
           const now = iso(Date.now());
           for (const l of b.labels)
             if (!issue.labels.includes(l))
-              issue.events.push({ event: "labeled", label: { name: l }, created_at: now, actor: { login: this.me.login, type: "User" } });
+              issue.events.push({ id: this.nextEvent++, event: "labeled", label: { name: l }, created_at: now, actor: { login: this.me.login, type: "User" } });
           issue.labels = [...b.labels];
         }
         if (b.state !== undefined) {
@@ -411,6 +456,7 @@ export class FakeGitHub {
           user: { login: this.me.login, avatar_url: avatar(this.me.login) },
         };
         issue.comments.push(c);
+        this.#touch(r, issue);
         return { status: 201, json: c };
       }
     }
@@ -428,7 +474,14 @@ export class FakeGitHub {
         if (this.#depth(r, issue.number) + this.#height(r, child.number) > 8)
           return { status: 422, json: { message: "超過 8 層" } };
         if ((r.children.get(issue.number) ?? []).length >= 100) return { status: 422, json: { message: "最多 100 個子任務" } };
+        const oldParent = child.parent !== null ? r.issues.get(child.parent) : null;
         this.#attach(r, issue.number, child.number);
+        if (oldParent) {
+          this.#event(oldParent, "sub_issue_removed");
+          this.#event(child, "parent_issue_removed");
+        }
+        this.#event(issue, "sub_issue_added");
+        this.#event(child, "parent_issue_added");
         return { status: 201, json: this.#rest(issue) };
       }
     }
@@ -438,6 +491,8 @@ export class FakeGitHub {
       if (!child || child.parent !== issue.number) return { status: 404, json: { message: "不是這個任務的子任務" } };
       r.children.set(issue.number, (r.children.get(issue.number) ?? []).filter((k) => k !== child.number));
       child.parent = null;
+      this.#event(issue, "sub_issue_removed");
+      this.#event(child, "parent_issue_removed");
       return { status: 200, json: this.#rest(issue) };
     }
     if (sub === "/sub_issues/priority" && method === "PATCH") {
@@ -451,6 +506,7 @@ export class FakeGitHub {
       const at = next.indexOf(anchor) + (req.body.after_id ? 1 : 0);
       next.splice(at, 0, moving);
       r.children.set(issue.number, next);
+      // 真實 GitHub 調整子任務順序不留事件、也不更新 updated_at
       return { status: 200, json: this.#rest(issue) };
     }
     return { status: 404, json: { message: `假 GitHub 尚未支援：${method} ${p}` } };

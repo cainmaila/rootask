@@ -10,7 +10,7 @@ import { TaskNode, type DragCtx, type TreeView } from "./TaskNode";
 import { gh } from "./api";
 import { track } from "./sync";
 import { useTreeDrag, type DropPosition } from "./useTreeDrag";
-import { applyReorder, newlyClosed, reorderAffects, replaceTasks } from "./optimistic";
+import { applyReorder, changedIssues, newlyClosed, reorderAffects, replaceTasks, structureChanges } from "./optimistic";
 import {
   createTask,
   fetchTasks,
@@ -22,6 +22,9 @@ import {
   abilitiesOf,
   neighbor,
   planReorder,
+  pollEvents,
+  pollIssues,
+  POLL_PAGE,
   statusOf,
   writeReorder,
   type TaskTree,
@@ -85,6 +88,17 @@ function canDropIn(tree: TaskTree, moving: number, target: number): boolean {
   };
   const tp = parentOf(target);
   return tp === parentOf(moving) || !moveBlockReason(tree, moving, tp);
+}
+
+/** 定時檢查的間隔；測試與 QA 可以用 localStorage 的 rootask:poll-ms 調短 */
+function pollInterval(): number {
+  try {
+    const v = Number(localStorage.getItem("rootask:poll-ms"));
+    if (v >= 200) return v;
+  } catch {
+    /* 存不了就用預設 */
+  }
+  return 30_000;
 }
 
 const projectHash = (owner: string, repo: string) => `#/p/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
@@ -279,11 +293,57 @@ export function ProjectView({
 
   useEffect(() => {
     void reload();
-    // 簡易同步：回到畫面時重新讀取
+    // 回到畫面時全部重新讀取
     const onFocus = () => document.visibilityState === "visible" && void reload();
     document.addEventListener("visibilitychange", onFocus);
     return () => document.removeEventListener("visibilitychange", onFocus);
   }, [reload]);
+
+  // 多人同步（#49）：畫面開著時定時用條件式請求檢查，沒變動時 GitHub 回 304（不扣額度）；
+  // 有變動只重新讀取變了的任務，還沒寫完的修改照樣疊在上面（#66），不打斷正在編輯的內容
+  useEffect(() => {
+    let issuesTag: string | null = null;
+    let eventsTag: string | null = null;
+    let lastEvent: number | null = null;
+    let running = false;
+    const tick = async () => {
+      if (running || document.visibilityState !== "visible" || !base.current) return;
+      running = true;
+      try {
+        // 內容與狀態看 issue 列表；換父任務只有事件看得到。兩個都是條件式請求
+        const [issues, events] = await Promise.all([
+          pollIssues(owner, repo, issuesTag),
+          pollEvents(owner, repo, eventsTag),
+        ]);
+        if (!base.current) return;
+        let changed: number[] = [];
+        if (issues) {
+          issuesTag = issues.etag;
+          changed = changedIssues(base.current, issues.stamps);
+        }
+        if (events) {
+          eventsTag = events.etag;
+          const s = structureChanges(events.events, lastEvent);
+          lastEvent = s.lastId;
+          changed = [...new Set([...changed, ...s.numbers])];
+        }
+        if (changed.length === 0) return;
+        if (changed.length >= POLL_PAGE) {
+          // 變動太多，這一頁看不完：整棵重讀
+          base.current = await loadTasks();
+          render();
+        } else {
+          await refresh(changed);
+        }
+      } catch {
+        /* 網路不穩時下次再試 */
+      } finally {
+        running = false;
+      }
+    };
+    const id = setInterval(() => void tick(), pollInterval());
+    return () => clearInterval(id);
+  }, [owner, repo, loadTasks, refresh, render]);
 
   if (error) return <main className="page error">讀取失敗：{error}</main>;
   if (!ctx) return <main className="page muted">載入任務中…</main>;

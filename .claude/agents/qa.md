@@ -40,8 +40,12 @@ npm run qa:serve      # 建置並啟動，背景執行；http://localhost:4173/#
   - `/__reset`：還原示範資料（每個測試情境開頭先 reset）
   - `/__latency?ms=800`：每個寫入延遲，看 loading 回饋
   - `/__fail?times=1&method=PATCH&path=/issues/3`：讓接下來符合的寫入失敗，測錯誤處理
-  - `/__as?login=amy&role=write`：切換登入者與權限（`admin`／`maintain`／`write`／`read`）
+  - `/__as?login=amy&role=write`：切換登入者與權限（`admin`／`maintain`／`write`／`triage`／`read`）
   - `GET /__state`：看假 GitHub 目前存了什麼，確認畫面上的操作真的寫進去了
+  - `GET /__requests`：上次查詢以來 App 呼叫了哪些 GitHub API（查完清空；條件式請求命中會標 `→ 304`）
+- 模擬「別人同時在改」（多人同步）：用 `page.request` 直接呼叫 `/api/gh/repos/demo/website/issues/13`（PATCH）、
+  `/api/gh/repos/demo/website/issues`（POST）、`.../issues/13/comments`（POST），不要透過畫面。
+  App 每 30 秒檢查一次；測試時在打開頁面前設 `localStorage.setItem("rootask:poll-ms", "500")` 把間隔調短。
 - 已知限制：假環境**沒有** webhook 自動化（bot 補狀態、轉換規則還原、父任務自動完成），這些不要在這裡回報。
 
 **次要：真實環境**（只有開發者明確要你測真實 GitHub 串接時）

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { isClosing, transitionAllowed } from "./config";
 import { isOverdue, metaError, todayLocal, type TaskMeta } from "../../shared/meta";
 import type { Mutation, ProjectCtx } from "./ProjectView";
@@ -85,12 +85,24 @@ export function TaskDetail({ n, ctx, close, full = false, expand, open }: Props)
     }
   }, [bodyFailed, editingBody, task.body, body]);
   // 失敗還原、或別人改了標題與日期時，欄位跟著更新（#48）
-  useEffect(() => setTitle(task.title), [task.title]);
+  // 正在打標題時不蓋掉（#49：別人同時改了標題）
+  const titleRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (document.activeElement !== titleRef.current) setTitle(task.title);
+  }, [task.title]);
   useEffect(() => setMeta(task.meta), [task.meta.start, task.meta.due]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // 任務有更新（含別人留言，#49）就重讀留言
   useEffect(() => {
-    listComments(owner, repo, n).then(setComments, (e: Error) => setErr(e.message));
-  }, [owner, repo, n]);
+    let live = true;
+    listComments(owner, repo, n).then(
+      (c) => live && setComments(c),
+      (e: Error) => live && setErr(e.message),
+    );
+    return () => {
+      live = false;
+    };
+  }, [owner, repo, n, task.updatedAt]);
 
   useEffect(() => {
     // 事件紀錄要等寫進 GitHub 才有，同步中先不讀（#68）
@@ -216,6 +228,7 @@ export function TaskDetail({ n, ctx, close, full = false, expand, open }: Props)
 
   const titleInput = (
     <input
+      ref={titleRef}
       className="title-input"
       readOnly={!canWrite}
       value={title}

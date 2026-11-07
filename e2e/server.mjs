@@ -54,10 +54,10 @@ const server = createServer(async (req, res) => {
         res.writeHead(out.status, out.headers ?? {});
         res.end(out.body);
       } else if (out.json !== undefined) {
-        res.writeHead(out.status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
+        res.writeHead(out.status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", ...(out.headers ?? {}) });
         res.end(JSON.stringify(out.json));
       } else {
-        res.writeHead(out.status);
+        res.writeHead(out.status, out.headers ?? {});
         res.end();
       }
       return;
