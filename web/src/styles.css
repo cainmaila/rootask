@@ -296,3 +296,18 @@ body.tree-dragging, body.tree-dragging * { cursor: grabbing !important; user-sel
 
 /* 隱藏已完成（#46） */
 .tree-bar { display: flex; align-items: center; gap: 8px; margin: -2px 0 6px; color: var(--muted); }
+
+/* 搜尋與篩選（#47） */
+.filter-bar { display: grid; gap: 6px; margin: 0 0 8px; }
+.filter-search { padding: 7px 10px; }
+.filter-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.filter-row select { width: auto; padding: 4px 8px; font-size: 13px; }
+.filter-row select.on, .chip.on { border-color: var(--accent); color: var(--accent); }
+.chip { border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; margin: 0; cursor: pointer; }
+.filter-count { margin-left: auto; }
+.node.context .node-title { color: var(--muted); }
+.node.context .pill, .node.context .avatar, .node.context .due { opacity: 0.5; }
+.empty p { margin: 6px 0; }
+/* 任務樹欄寬不被內容撐開（深層任務的日期、狀態、頭像會讓標題縮短顯示…） */
+.split { grid-template-columns: minmax(0, 1fr); }
+section.tree { min-width: 0; }

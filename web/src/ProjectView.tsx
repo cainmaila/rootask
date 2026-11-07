@@ -1,8 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { loadConfig, saveConfig, type LoadedConfig } from "./config";
 import { Settings } from "./Settings";
+import { FilterBar } from "./FilterBar";
+import { EMPTY_FILTER, filterTasks, isFilterActive, type TaskFilter } from "../../shared/filter";
+import { isClosing } from "./config";
+import { todayLocal } from "../../shared/meta";
 import { TaskDetail } from "./TaskDetail";
-import { TaskNode, type DragCtx } from "./TaskNode";
+import { TaskNode, type DragCtx, type TreeView } from "./TaskNode";
 import { gh } from "./api";
 import { track } from "./sync";
 import { useTreeDrag, type DropPosition } from "./useTreeDrag";
@@ -15,6 +19,7 @@ import {
   myPermission,
   neighbor,
   reorderTask,
+  statusOf,
   type TaskTree,
   type Person,
   type LoadedTree,
@@ -74,6 +79,10 @@ export function ProjectView({ owner, repo, fullTask = null }: { owner: string; r
   const [busy, setBusy] = useState(false);
   const [showDone, setShowDone] = useState(() => readShowDone(owner, repo));
   const [loadingDone, setLoadingDone] = useState(false);
+  const [filter, setFilter] = useState<TaskFilter>(EMPTY_FILTER);
+  // 篩選時會自動展開符合任務的上層；使用者在篩選中手動展開／收合的記在這裡，換條件就重來
+  const [filterToggles, setFilterToggles] = useState<Map<number, boolean>>(new Map());
+  useEffect(() => setFilterToggles(new Map()), [filter]);
 
   // 正在看的任務一定要載入，即使已完成（剛改成完成時面板不會突然消失）
   const pinned = useRef<number[]>([]);
@@ -174,15 +183,53 @@ export function ProjectView({ owner, repo, fullTask = null }: { owner: string; r
     );
   }
   const canAdmin = ctx.permission === "admin" || ctx.permission === "maintain";
-  const roots = ctx.tree.children.get(null) ?? [];
+  // ---------- 搜尋與篩選（#47） ----------
+  const filtering = isFilterActive(filter);
+  const result = filtering
+    ? filterTasks(
+        [...ctx.tree.byNumber.values()].map((t) => {
+          const st = statusOf(t, ctx.cfg.config);
+          return {
+            number: t.number,
+            title: t.title,
+            body: t.body,
+            parent: t.parent,
+            assignees: t.assignees.map((a) => a.login),
+            statusId: st.id,
+            closed: isClosing(st.category),
+            due: t.meta.due,
+          };
+        }),
+        filter,
+        ctx.me,
+        todayLocal(),
+      )
+    : null;
+  const view: TreeView | null = result && { visible: result.visible, matches: result.matches };
+  const effExpanded = result
+    ? new Set(
+        [...ctx.tree.byNumber.keys()].filter((n) =>
+          filterToggles.has(n) ? filterToggles.get(n) : result.expand.has(n) || expanded.has(n),
+        ),
+      )
+    : expanded;
+  const roots = (ctx.tree.children.get(null) ?? []).filter((n) => !view || view.visible.has(n));
+  // 篩選「已完成」類的狀態，但已完成的任務被隱藏著
+  const filterNeedsDone =
+    !showDone && !!filter.status && isClosing(ctx.cfg.config.statuses.find((s) => s.id === filter.status)?.category ?? "todo");
 
-  const toggle = (n: number) =>
+  const toggle = (n: number) => {
+    if (result) {
+      setFilterToggles((m) => new Map(m).set(n, !effExpanded.has(n)));
+      return;
+    }
     setExpanded((s) => {
       const next = new Set(s);
       if (next.has(n)) next.delete(n);
       else next.add(n);
       return next;
     });
+  };
 
   async function addRoot() {
     const title = newTitle.trim();
@@ -263,14 +310,35 @@ export function ProjectView({ owner, repo, fullTask = null }: { owner: string; r
                 新增
               </button>
             </form>
-            <div className="tree-bar">
-              <label className="check small">
-                <input type="checkbox" checked={showDone} disabled={loadingDone} onChange={() => void toggleShowDone()} />
-                顯示已完成{ctx.tree.closedCount > 0 && `（${ctx.tree.closedCount}）`}
-              </label>
-              {loadingDone && <span className="spinner" aria-label="載入中" />}
-            </div>
-            {roots.length === 0 && (
+            <FilterBar
+              filter={filter}
+              onChange={setFilter}
+              statuses={ctx.cfg.config.statuses}
+              people={ctx.people}
+              matchCount={result ? result.matches.size : null}
+              showDone={showDone}
+              closedCount={ctx.tree.closedCount}
+              loadingDone={loadingDone}
+              onToggleDone={() => void toggleShowDone()}
+            />
+            {filtering && roots.length === 0 && (
+              <div className="muted empty">
+                <p>沒有符合的任務。</p>
+                {filterNeedsDone && (
+                  <p>
+                    這個狀態的任務已完成而被隱藏了，
+                    <button className="link-btn" onClick={() => void toggleShowDone()}>
+                      顯示已完成
+                    </button>
+                    就看得到。
+                  </p>
+                )}
+                <button className="btn small" onClick={() => setFilter(EMPTY_FILTER)}>
+                  清除篩選
+                </button>
+              </div>
+            )}
+            {!filtering && roots.length === 0 && (
               <p className="muted empty">
                 {!showDone && ctx.tree.closedCount > 0 ? "目前沒有未完成的任務 🎉" : "還沒有任務，從上面新增第一個吧。"}
               </p>
@@ -279,9 +347,10 @@ export function ProjectView({ owner, repo, fullTask = null }: { owner: string; r
               {roots.map((n) => (
                 <TaskNode
                   key={n}
+                  view={view}
                   n={n}
                   ctx={full}
-                  expanded={expanded}
+                  expanded={effExpanded}
                   toggle={toggle}
                   selected={selected}
                   select={setSelected}

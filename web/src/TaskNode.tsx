@@ -16,7 +16,14 @@ export interface DragCtx {
   moveBy: (n: number, dir: -1 | 1) => void;
 }
 
+/** 篩選結果（#47）：null 表示沒有篩選 */
+export interface TreeView {
+  visible: Set<number>;
+  matches: Set<number>;
+}
+
 interface Props {
+  view: TreeView | null;
   n: number;
   ctx: ProjectCtx;
   expanded: Set<number>;
@@ -26,9 +33,11 @@ interface Props {
   drag: DragCtx;
 }
 
-export function TaskNode({ n, ctx, expanded, toggle, selected, select, drag }: Props) {
+export function TaskNode({ view, n, ctx, expanded, toggle, selected, select, drag }: Props) {
   const task = ctx.tree.byNumber.get(n)!;
-  const kids = ctx.tree.children.get(n) ?? [];
+  const kids = (ctx.tree.children.get(n) ?? []).filter((k) => !view || view.visible.has(k));
+  // 篩選時只是因為底下有符合的任務才顯示的上層，淡化當作脈絡
+  const context = !!view && !view.matches.has(n);
   const open = expanded.has(n);
   const status = statusOf(task, ctx.cfg.config);
   // 子任務數用 GitHub 的統計：隱藏已完成時，沒載入的已完成子任務也要算進去（#46）
@@ -71,7 +80,7 @@ export function TaskNode({ n, ctx, expanded, toggle, selected, select, drag }: P
   return (
     <li className={drag.dragging === n ? "dragging" : ""}>
       <div
-        className={`node ${selected === n ? "sel" : ""} cat-${status.category} ${dropClass} ${syncing ? "syncing" : ""}`}
+        className={`node ${selected === n ? "sel" : ""} cat-${status.category} ${dropClass} ${syncing ? "syncing" : ""} ${context ? "context" : ""}`}
         aria-busy={syncing}
         data-node={n}
       >
@@ -145,7 +154,7 @@ export function TaskNode({ n, ctx, expanded, toggle, selected, select, drag }: P
       {open && kids.length > 0 && (
         <ul className="nodes">
           {kids.map((k) => (
-            <TaskNode key={k} n={k} ctx={ctx} expanded={expanded} toggle={toggle} selected={selected} select={select} drag={drag} />
+            <TaskNode key={k} view={view} n={k} ctx={ctx} expanded={expanded} toggle={toggle} selected={selected} select={select} drag={drag} />
           ))}
         </ul>
       )}
