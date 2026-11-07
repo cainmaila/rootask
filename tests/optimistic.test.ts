@@ -9,6 +9,7 @@ import {
   replaceTasks,
   restoreTasks,
   statusPatch,
+  withStatus,
 } from "../web/src/optimistic";
 import type { StatusDef } from "../web/src/config";
 
@@ -74,6 +75,14 @@ describe("樂觀更新（#48）", () => {
     expect(reopened.closedCount).toBe(0);
 
     expect(statusPatch(t.byNumber.get(2)!, dropped).stateReason).toBe("NOT_PLANNED");
+  });
+
+  it("#69 子任務改成完成／改回來，父任務的完成數立刻跟著變", () => {
+    const t = withStatus(base(), 4, done);
+    expect(t.byNumber.get(1)).toMatchObject({ childCompleted: 1, childTotal: 2 });
+    expect(withStatus(t, 4, done).byNumber.get(1)!.childCompleted).toBe(1); // 已完成再改成完成不重複計算
+    expect(withStatus(t, 4, todo).byNumber.get(1)!.childCompleted).toBe(0);
+    expect(withStatus(base(), 2, done).byNumber.get(2)!.state).toBe("CLOSED"); // 沒有父任務也可以
   });
 
   it("換父任務：舊的拿掉、新的接在最後，子任務數跟著變", () => {

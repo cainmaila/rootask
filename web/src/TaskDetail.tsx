@@ -2,10 +2,10 @@ import { useEffect, useMemo, useState } from "react";
 import { isClosing, transitionAllowed } from "./config";
 import { isOverdue, metaError, todayLocal, type TaskMeta } from "../../shared/meta";
 import type { Mutation, ProjectCtx } from "./ProjectView";
-import { patchTask, reparent, statusPatch } from "./optimistic";
+import { patchTask, reparent, withStatus } from "./optimistic";
 import { AttachTextarea } from "./AttachTextarea";
 import { Markdown } from "./Markdown";
-import { track } from "./sync";
+import { track, useSync } from "./sync";
 import {
   actualTimes,
   addComment,
@@ -58,11 +58,23 @@ export function TaskDetail({ n, ctx, close, full = false, expand, open }: Props)
   const [err, setErr] = useState<string | null>(null);
   const [meta, setMeta] = useState<TaskMeta>(task.meta);
   const [actual, setActual] = useState<ActualTimes | null>(null);
+  // 同步中（含按重試、或從列表拖曳）欄位一律鎖住，免得以為沒反應又改一次（#70）
+  const syncing = useSync().tasks.has(n);
+  const locked = busy || syncing;
 
   // 別人改了內容而自己沒在編輯時，跟著更新
   useEffect(() => {
     if (!editingBody) setBody(task.body ?? "");
   }, [task.body, editingBody]);
+  // 說明沒存到後，按頂端列的「重試」存好了：關掉編輯框（#67）
+  const [bodyFailed, setBodyFailed] = useState(false);
+  useEffect(() => {
+    if (bodyFailed && editingBody && (task.body ?? "") === body) {
+      setBodyFailed(false);
+      setEditingBody(false);
+      setErr(null);
+    }
+  }, [bodyFailed, editingBody, task.body, body]);
   // 失敗還原、或別人改了標題與日期時，欄位跟著更新（#48）
   useEffect(() => setTitle(task.title), [task.title]);
   useEffect(() => setMeta(task.meta), [task.meta.start, task.meta.due]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -72,9 +84,18 @@ export function TaskDetail({ n, ctx, close, full = false, expand, open }: Props)
   }, [owner, repo, n]);
 
   useEffect(() => {
-    actualTimes(owner, repo, task, cfg.config).then(setActual, () => setActual({ start: null, end: null }));
-    // 狀態或關閉時間變了才重算
-  }, [owner, repo, task.number, task.state, task.closedAt, task.labels.join(","), cfg.config]); // eslint-disable-line react-hooks/exhaustive-deps
+    // 事件紀錄要等寫進 GitHub 才有，同步中先不讀（#68）
+    if (syncing) return;
+    let live = true;
+    actualTimes(owner, repo, task, cfg.config).then(
+      (a) => live && setActual(a),
+      () => live && setActual({ start: null, end: null }),
+    );
+    return () => {
+      live = false;
+    };
+    // 狀態或關閉時間變了、同步完成時才重算
+  }, [owner, repo, task.number, task.state, task.closedAt, task.labels.join(","), cfg.config, syncing]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function saveDates(next: TaskMeta) {
     setMeta(next);
@@ -103,25 +124,34 @@ export function TaskDetail({ n, ctx, close, full = false, expand, open }: Props)
    * 寫回 GitHub：先在畫面上生效，成功後只重新讀取這張任務（#48）；
    * 期間頂端列顯示同步中，失敗時還原並在頂端列提示（#53）
    */
-  async function run(label: string, op: Omit<Mutation, "tasks"> & { tasks?: number[] }) {
+  async function run(label: string, op: Omit<Mutation, "tasks"> & { tasks?: number[] }): Promise<boolean> {
     setBusy(true);
     setErr(null);
     try {
       await ctx.mutate(label, { tasks: [n], ...op });
+      return true;
     } catch {
-      /* 錯誤由頂端列顯示 */
+      return false; // 錯誤由頂端列顯示
     } finally {
       setBusy(false);
     }
   }
 
-  function saveBody() {
+  async function saveBody() {
     setEditingBody(false);
-    if (body !== (task.body ?? ""))
-      void run("更新說明", {
-        optimistic: (t) => patchTask(t, n, { body }),
-        write: () => updateBody(owner, repo, n, { text: body }),
-      });
+    const text = body;
+    if (text === (task.body ?? "")) return;
+    const ok = await run("更新說明", {
+      optimistic: (t) => patchTask(t, n, { body: text }),
+      write: () => updateBody(owner, repo, n, { text }),
+    });
+    // 沒存到：打的內容放回編輯框，不會因為關掉錯誤訊息就不見（#67）
+    if (!ok) {
+      setBody(text);
+      setEditingBody(true);
+      setBodyFailed(true);
+      setErr("說明沒有存到，內容還在編輯框裡，可以再按一次儲存。");
+    }
   }
 
   const assigned = new Set(task.assignees.map((a) => a.login));
@@ -224,7 +254,7 @@ export function TaskDetail({ n, ctx, close, full = false, expand, open }: Props)
               >
                 取消
               </button>
-              <button className="btn primary" disabled={uploading || busy} onClick={saveBody}>
+              <button className="btn primary" disabled={uploading || busy} onClick={() => void saveBody()}>
                 儲存
               </button>
             </span>
@@ -251,13 +281,13 @@ export function TaskDetail({ n, ctx, close, full = false, expand, open }: Props)
         <select
           aria-label="狀態"
           value={status.id}
-          disabled={busy || !canWrite}
+          disabled={locked || !canWrite}
           onChange={(e) => {
             const s = cfg.config.statuses.find((x) => x.id === e.target.value)!;
             void run("改狀態", {
               // 父任務的完成數也會變
               refresh: [n, ...(task.parent !== null ? [task.parent] : [])],
-              optimistic: (t) => patchTask(t, n, statusPatch(task, s)),
+              optimistic: (t) => withStatus(t, n, s),
               write: () => setStatus(owner, repo, task, s),
             });
           }}
@@ -278,7 +308,7 @@ export function TaskDetail({ n, ctx, close, full = false, expand, open }: Props)
         <select
           aria-label="父任務"
           value={task.parent ?? ""}
-          disabled={busy || !canWrite}
+          disabled={locked || !canWrite}
           onChange={(e) => {
             const v = e.target.value === "" ? null : Number(e.target.value);
             void run("移動任務", {
@@ -308,7 +338,7 @@ export function TaskDetail({ n, ctx, close, full = false, expand, open }: Props)
                 <button
                   key={dir}
                   className="btn small"
-                  disabled={busy || !nb}
+                  disabled={locked || !nb}
                   onClick={() => nb && ctx.reorder(n, nb.target, nb.position)}
                 >
                   {dir < 0 ? "↑ 上移" : "↓ 下移"}
@@ -328,7 +358,7 @@ export function TaskDetail({ n, ctx, close, full = false, expand, open }: Props)
               type="date"
               value={meta.start ?? ""}
               max={meta.due}
-              disabled={busy || !canWrite}
+              disabled={locked || !canWrite}
               onChange={(e) => saveDates({ ...meta, start: e.target.value || undefined })}
             />
           </label>
@@ -338,7 +368,7 @@ export function TaskDetail({ n, ctx, close, full = false, expand, open }: Props)
               type="date"
               value={meta.due ?? ""}
               min={meta.start}
-              disabled={busy || !canWrite}
+              disabled={locked || !canWrite}
               onChange={(e) => saveDates({ ...meta, due: e.target.value || undefined })}
             />
           </label>
@@ -360,7 +390,7 @@ export function TaskDetail({ n, ctx, close, full = false, expand, open }: Props)
             <button
               key={p.login}
               className={`person ${assigned.has(p.login) ? "on" : ""}`}
-              disabled={!canWrite || busy || (!assigned.has(p.login) && assigned.size >= MAX_ASSIGNEES)}
+              disabled={!canWrite || locked || (!assigned.has(p.login) && assigned.size >= MAX_ASSIGNEES)}
               onClick={() => toggleAssignee(p.login)}
             >
               <img className="avatar" src={p.avatarUrl} alt="" />

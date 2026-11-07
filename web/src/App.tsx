@@ -4,6 +4,18 @@ import { ProjectList } from "./ProjectList";
 import { ProjectView } from "./ProjectView";
 import { SyncIndicator } from "./SyncIndicator";
 
+// 頂端列的實際高度（同步失敗時會變高）給 CSS 用：手機的任務詳情面板不能被頂端列蓋住（#67）
+let topbarObserver: ResizeObserver | null = null;
+function observeTopbar(el: HTMLElement | null) {
+  topbarObserver?.disconnect();
+  topbarObserver = null;
+  if (!el || typeof ResizeObserver === "undefined") return;
+  topbarObserver = new ResizeObserver(() =>
+    document.documentElement.style.setProperty("--topbar-h", `${el.offsetHeight}px`),
+  );
+  topbarObserver.observe(el);
+}
+
 type Route = { name: "projects" } | { name: "project"; owner: string; repo: string; task: number | null };
 
 function parseRoute(): Route {
@@ -74,7 +86,7 @@ export function App() {
 
   return (
     <div className="app">
-      <header className="topbar">
+      <header className="topbar" ref={observeTopbar}>
         <a className="brand" href="#/">
           <img src="/icon.svg" alt="" width={24} height={24} />
           Rootask

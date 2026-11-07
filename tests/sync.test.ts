@@ -14,7 +14,7 @@ describe("同步狀態（#53）", () => {
     expect(getSyncState().tasks.has(7)).toBe(true);
     done();
     await p;
-    expect(getSyncState()).toMatchObject({ pending: 0, justSynced: true, error: null });
+    expect(getSyncState()).toMatchObject({ pending: 0, justSynced: true, errors: [] });
     expect(getSyncState().tasks.has(7)).toBe(false);
     vi.advanceTimersByTime(2000);
     expect(getSyncState().justSynced).toBe(false);
@@ -40,22 +40,41 @@ describe("同步狀態（#53）", () => {
     };
     await expect(track("調整順序", fn, [5])).rejects.toThrow("網路中斷");
     const s = getSyncState();
-    expect(s.error?.message).toBe("調整順序（#5）失敗：網路中斷");
+    expect(s.errors.map((e) => e.message)).toEqual(["調整順序（#5）失敗：網路中斷"]);
     expect(s.justSynced).toBe(false);
     expect(s.tasks.has(5)).toBe(false);
-    s.error!.retry();
+    s.errors[0].retry!();
     await vi.runAllTimersAsync();
     expect(calls).toBe(2);
-    expect(getSyncState().error).toBeNull();
+    expect(getSyncState().errors).toEqual([]);
   });
 
   it("權限不足等 4xx 錯誤不提供重試，5xx 與網路錯誤可以重試", async () => {
     const { ApiError } = await import("../web/src/api");
     await expect(track("改狀態", () => Promise.reject(new ApiError(403, "沒有寫入權限")), [3])).rejects.toThrow();
-    expect(getSyncState().error).toMatchObject({ message: "改狀態（#3）失敗：沒有寫入權限", retry: null });
-    await expect(track("改狀態", () => Promise.reject(new ApiError(503, "暫時無法服務")))).rejects.toThrow();
-    expect(getSyncState().error?.retry).toBeTypeOf("function");
-    await expect(track("改狀態", () => Promise.reject(new ApiError(429, "太多請求")))).rejects.toThrow();
-    expect(getSyncState().error?.retry).toBeTypeOf("function");
+    expect(getSyncState().errors[0]).toMatchObject({ message: "改狀態（#3）失敗：沒有寫入權限", retry: null });
+    await expect(track("改狀態", () => Promise.reject(new ApiError(503, "暫時無法服務")), [4])).rejects.toThrow();
+    expect(getSyncState().errors[1].retry).toBeTypeOf("function");
+    await expect(track("改狀態", () => Promise.reject(new ApiError(429, "太多請求")), [5])).rejects.toThrow();
+    expect(getSyncState().errors[2].retry).toBeTypeOf("function");
+  });
+
+  it("#67 接連失敗時每一則都保留；同一個操作再失敗只留最新的", async () => {
+    await expect(track("更新說明", () => Promise.reject(new Error("a")), [1])).rejects.toThrow();
+    await expect(track("改狀態", () => Promise.reject(new Error("b")), [2])).rejects.toThrow();
+    expect(getSyncState().errors.map((e) => e.message)).toEqual(["更新說明（#1）失敗：a", "改狀態（#2）失敗：b"]);
+    await expect(track("改狀態", () => Promise.reject(new Error("c")), [2])).rejects.toThrow();
+    expect(getSyncState().errors.map((e) => e.message)).toEqual(["更新說明（#1）失敗：a", "改狀態（#2）失敗：c"]);
+    // 其他操作成功不會清掉還沒處理的錯誤，也不顯示「已同步」
+    await track("更新標題", async () => {}, [3]);
+    expect(getSyncState()).toMatchObject({ justSynced: false });
+    expect(getSyncState().errors).toHaveLength(2);
+  });
+
+  it("#70 可以指定重試要做什麼", async () => {
+    const retry = vi.fn();
+    await expect(track("改狀態", () => Promise.reject(new Error("x")), [2], { retry })).rejects.toThrow();
+    getSyncState().errors[0].retry!();
+    expect(retry).toHaveBeenCalledOnce();
   });
 });

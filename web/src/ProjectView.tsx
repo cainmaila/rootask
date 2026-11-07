@@ -10,7 +10,7 @@ import { TaskNode, type DragCtx, type TreeView } from "./TaskNode";
 import { gh } from "./api";
 import { track } from "./sync";
 import { useTreeDrag, type DropPosition } from "./useTreeDrag";
-import { applyReorder, newlyClosed, reorderAffects, replaceTasks, restoreTasks } from "./optimistic";
+import { applyReorder, newlyClosed, reorderAffects, replaceTasks } from "./optimistic";
 import {
   createTask,
   fetchTasks,
@@ -123,11 +123,18 @@ export function ProjectView({
   // 這次開啟後才完成的任務，留在清單上到重新整理為止，改錯了還能馬上改回來（#63）
   const keepDone = useRef(new Set<number>());
 
-  /** 換上新的任務樹；記下剛完成的任務 */
-  const setTree = useCallback((update: (t: LoadedTree) => LoadedTree) => {
+  // 畫面上的任務樹＝GitHub 讀回來的資料（base）＋還沒寫完的樂觀修改（pending）。
+  // 讀回來的資料可能還不含寫到一半的修改，所以每次都重新疊上去，畫面才不會跳回舊值（#66）；
+  // 失敗時只要拿掉那筆修改，畫面自然回到 GitHub 上的樣子。
+  const base = useRef<LoadedTree | null>(null);
+  const pending = useRef(new Map<number, (t: LoadedTree) => LoadedTree>());
+  const seq = useRef(0);
+
+  /** 依 base 與 pending 重算畫面；記下剛完成的任務（#63） */
+  const render = useCallback(() => {
     setCtx((c) => {
-      if (!c) return c;
-      const tree = update(c.tree);
+      if (!c || !base.current) return c;
+      const tree = [...pending.current.values()].reduce((t, f) => f(t), base.current);
       newlyClosed(c.tree, tree).forEach((n) => keepDone.current.add(n));
       return { ...c, tree };
     });
@@ -148,50 +155,64 @@ export function ProjectView({
         myPermission(owner, repo),
         gh<{ login: string }>("/user"),
       ]);
-      setCtx((c) => {
-        if (c) newlyClosed(c.tree, tree).forEach((n) => keepDone.current.add(n));
-        return { owner, repo, cfg, tree, people, permission, me: user.login };
-      });
+      base.current = tree;
+      setCtx((c) => ({ owner, repo, cfg, tree: c?.tree ?? tree, people, permission, me: user.login }));
+      render();
       setError(null);
     } catch (e) {
       setError((e as Error).message);
     }
-  }, [owner, repo, loadTasks]);
+  }, [owner, repo, loadTasks, render]);
 
-  /** 只重新讀取這幾張任務（#48） */
+  /** 只重新讀取這幾張任務（#48）；done 是剛寫完的修改，讀回來之後就不必再疊 */
   const refresh = useCallback(
-    async (numbers: number[]) => {
-      const cur = ctxRef.current?.tree;
-      if (!cur || numbers.length === 0) return;
-      const got = await fetchTasks(owner, repo, numbers, (n) => cur.byNumber.has(n));
-      setTree((t) => replaceTasks(t, got));
+    async (numbers: number[], done?: number) => {
+      const cur = base.current;
+      if (!cur) return;
+      const got = numbers.length ? await fetchTasks(owner, repo, numbers, (n) => cur.byNumber.has(n)) : [];
+      base.current = replaceTasks(base.current!, got);
+      if (done !== undefined) pending.current.delete(done);
+      render();
     },
-    [owner, repo, setTree],
+    [owner, repo, render],
   );
 
+  const mutateRef = useRef<ProjectCtx["mutate"] | null>(null);
   const mutate = useCallback(
     async (label: string, op: Mutation) => {
-      const before = ctxRef.current?.tree;
       const affected = op.refresh ?? op.tasks;
-      if (before && op.optimistic) setTree(op.optimistic);
+      const id = ++seq.current;
+      if (op.optimistic) {
+        pending.current.set(id, op.optimistic);
+        render();
+      }
+      let written = false;
       try {
         await track(
           label,
           async () => {
             await op.write();
-            await refresh(affected);
+            written = true;
+            await refresh(affected, id);
           },
           op.tasks,
+          // 重試＝從頭再做一次，畫面一樣先變、欄位一樣鎖住（#70）
+          { retry: () => void mutateRef.current?.(label, op).catch(() => {}) },
         );
       } catch (e) {
-        // 還原成操作前的樣子，再向 GitHub 確認實際狀態（可能只做了一半）
-        if (before && op.optimistic) setTree((t) => restoreTasks(t, before, affected));
-        void refresh(affected).catch(() => {});
+        if (pending.current.delete(id)) {
+          // 已經寫進 GitHub、只是讀回來失敗：GitHub 上就是這個樣子，直接留在 base
+          if (written && op.optimistic && base.current) base.current = op.optimistic(base.current);
+          render();
+        }
+        // 向 GitHub 確認實際狀態（多步驟的操作可能只做了一半）
+        if (!written) void refresh(affected).catch(() => {});
         throw e;
       }
     },
-    [refresh, setTree],
+    [refresh, render],
   );
+  mutateRef.current = mutate;
 
   async function toggleShowDone() {
     const next = !showDone;
@@ -201,8 +222,8 @@ export function ProjectView({
     if (!next) keepDone.current.clear(); // 明確切回隱藏，就全部照規則隱藏
     setLoadingDone(true);
     try {
-      const tree = await loadTasks();
-      setTree(() => tree);
+      base.current = await loadTasks();
+      render();
     } catch (e) {
       setError((e as Error).message);
     }
@@ -266,7 +287,7 @@ export function ProjectView({
   if (error) return <main className="page error">讀取失敗：{error}</main>;
   if (!ctx) return <main className="page muted">載入任務中…</main>;
 
-  const full: ProjectCtx = { ...ctx, reload, mutate, refresh, reorder };
+  const full: ProjectCtx = { ...ctx, reload, mutate, refresh: (ns: number[]) => refresh(ns), reorder };
 
   // 唯讀成員不能新增、排序、修改（#59）
   const canWrite = ["admin", "maintain", "write"].includes(ctx.permission);

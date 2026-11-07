@@ -151,7 +151,8 @@ textarea { resize: vertical; }
 @media (min-width: 900px) { .detail { position: sticky; top: 70px; max-height: calc(100vh - 90px); overflow: auto; } }
 @media (max-width: 899px) {
   .detail {
-    position: fixed; inset: auto 0 0 0; z-index: 10; max-height: 85vh; overflow: auto;
+    position: fixed; inset: auto 0 0 0; z-index: 10; overflow: auto;
+    max-height: min(85vh, calc(100dvh - var(--topbar-h, 56px) - 8px));
     border-radius: 16px 16px 0 0; padding-bottom: calc(16px + env(safe-area-inset-bottom));
     box-shadow: 0 -8px 30px rgb(0 0 0 / 0.15);
   }
@@ -281,7 +282,8 @@ body.tree-dragging, body.tree-dragging * { cursor: grabbing !important; user-sel
 .sync + .link { margin-left: 12px; }
 .sync-busy { color: var(--muted); }
 .sync-done { color: var(--c-done); }
-.sync-error { color: var(--danger); min-width: 0; }
+.sync-error { color: var(--danger); min-width: 0; flex-direction: column; align-items: stretch; gap: 4px; }
+.sync-row { display: flex; align-items: center; justify-content: flex-end; gap: 6px; min-width: 0; }
 .sync-error .sync-msg { overflow: hidden; text-overflow: ellipsis; max-width: 40vw; }
 .spinner {
   display: inline-block; width: 12px; height: 12px; flex-shrink: 0;
@@ -333,12 +335,13 @@ section.tree { min-width: 0; }
   .topbar { flex-wrap: wrap; row-gap: 8px; }
   .sync-error {
     order: 10; flex: 1 1 100%;
-    margin: 0; padding: 8px 10px; border-radius: 10px; white-space: normal; align-items: flex-start;
+    margin: 0; padding: 8px 10px; border-radius: 10px; white-space: normal;
     background: var(--surface); border: 1px solid var(--danger);
   }
   /* 錯誤排到第二行時，「登出」仍靠右 */
   .sync-error + .link { margin-left: auto; }
   /* 錯誤要蓋在任務詳情的下拉面板上面 */
   .topbar:has(.sync-error) { z-index: 20; }
+  .sync-row { align-items: flex-start; justify-content: flex-start; }
   .sync-error .sync-msg { max-width: none; overflow: visible; flex: 1; }
 }

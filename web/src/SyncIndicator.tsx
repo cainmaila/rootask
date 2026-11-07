@@ -1,23 +1,27 @@
 import { dismissSyncError, useSync } from "./sync";
 
-/** 頂端列的同步狀態（#53） */
+/** 頂端列的同步狀態（#53）；失敗時一個操作一列，各自可以重試或關掉（#67） */
 export function SyncIndicator() {
   const s = useSync();
-  if (s.error) {
+  if (s.errors.length > 0) {
     return (
-      <span className="sync sync-error" role="alert">
-        <span className="sync-msg" title={s.error.message}>
-          ⚠ {s.error.message}
-        </span>
-        {s.error.retry && (
-          <button className="btn small" onClick={s.error.retry}>
-            重試
-          </button>
-        )}
-        <button className="icon" onClick={dismissSyncError} aria-label="關閉">
-          ✕
-        </button>
-      </span>
+      <div className="sync sync-error" role="alert">
+        {s.errors.map((e) => (
+          <div className="sync-row" key={e.key}>
+            <span className="sync-msg" title={e.message}>
+              ⚠ {e.message}
+            </span>
+            {e.retry && (
+              <button className="btn small" onClick={e.retry}>
+                重試
+              </button>
+            )}
+            <button className="icon" onClick={() => dismissSyncError(e.key)} aria-label="關閉">
+              ✕
+            </button>
+          </div>
+        ))}
+      </div>
     );
   }
   if (s.pending > 0) {

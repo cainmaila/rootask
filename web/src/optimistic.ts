@@ -45,6 +45,20 @@ export function statusPatch(task: Task, status: StatusDef, now = new Date().toIS
   };
 }
 
+/** 改狀態：任務本身＋父任務的完成數（#69）。GitHub 的完成數算的是已關閉的子任務 */
+export function withStatus(tree: LoadedTree, n: number, status: StatusDef, now?: string): LoadedTree {
+  const task = tree.byNumber.get(n);
+  if (!task) return tree;
+  const next = { ...task, ...statusPatch(task, status, now) };
+  const changed: Task[] = [next];
+  const parent = task.parent !== null ? tree.byNumber.get(task.parent) : undefined;
+  const delta = Number(isClosed(next)) - Number(isClosed(task));
+  if (parent && delta) {
+    changed.push({ ...parent, childCompleted: Math.min(parent.childTotal, Math.max(0, parent.childCompleted + delta)) });
+  }
+  return replaceTasks(tree, changed);
+}
+
 /** 換父任務：從舊的父任務拿掉、接到新父任務的最後（GitHub 也是加在最後） */
 export function reparent(tree: LoadedTree, n: number, to: number | null): LoadedTree {
   const task = tree.byNumber.get(n);

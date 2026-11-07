@@ -159,6 +159,21 @@ test.describe("手機", () => {
     await expect(page.getByRole("heading", { name: "狀態" })).toBeVisible();
   });
 
+  test("#67 手機上同時有兩則同步失敗，任務詳情的關閉鈕仍按得到", async ({ page }) => {
+    await page.request.post("/__fail?times=2&method=PATCH");
+    await openProject(page);
+    await row(page, "整理專案文件").locator(".node-title").tap();
+    const panel = page.locator("aside.detail");
+    await panel.getByLabel("狀態", { exact: true }).selectOption("doing");
+    await expect(page.getByRole("alert")).toContainText("改狀態");
+    await panel.locator(".title-input").fill("新標題");
+    await panel.locator(".title-input").blur();
+    await expect(page.getByRole("alert")).toContainText("更新標題");
+    // tap 會檢查按鈕沒有被別的元素蓋住
+    await panel.getByRole("button", { name: "關閉" }).tap({ timeout: 3000 });
+    await expect(panel).toHaveCount(0);
+  });
+
   test("#59 唯讀成員看到空專案時，不會叫他新增", async ({ page }) => {
     await page.request.post("/__as?login=amy&role=read");
     await page.goto("/#/p/demo/empty-project");
