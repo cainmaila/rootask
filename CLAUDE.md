@@ -30,6 +30,13 @@
 > 注意：這個開發環境的 `gh` 無法使用 GraphQL，只能用 REST（`gh api repos/cainmaila/rootask/...`）。
 > App 本身在正式環境會使用 GraphQL，不受此限。
 
+## QA agent（#55）
+
+- `.claude/agents/qa.md` 是 QA 的角色設定：以使用者角度實際操作 App，發現問題開 issue（`type:bug`＋`qa`），在 issue 上和開發者討論。
+- **一項功能完成、要給 Cain 驗收前**，派 QA 跑一輪（Agent 工具，帶上要測的 issue 編號、要掛的 epic）。不是每次改動都跑。
+- QA 回報的 issue：修正後在 issue 留言附 commit，再請 QA 驗證；認為是設計如此就留言說明理由；需要產品判斷的標 `type:decision` 給 Cain。
+- QA 環境：`npm run qa:serve`（建置後的前端＋`e2e/fake-github.mjs` 假 GitHub，不需登入）。新增會呼叫 GitHub 的功能時，假 GitHub 也要一起支援。
+
 ## 技術概要
 
 - `worker/`：Cloudflare Worker（無狀態）。GitHub 登入、加密 cookie、`/api/gh/*` 代理、webhook。
@@ -38,5 +45,5 @@
 
 ## 驗證
 
-改完程式至少跑：`npm run typecheck && npm test && npm run build`。
+改完程式至少跑：`npm run typecheck && npm test && npm run build`，動到介面時再跑 `npm run test:e2e`（Playwright，桌面＋手機）。
 自動化邏輯的測試用 `tests/fake-github.ts`（記憶體中的假 GitHub），新增規則時請一併加測試。

@@ -16,7 +16,9 @@
     "secret": "wrangler secret put -c local/wrangler.toml",
     "secret:list": "wrangler secret list -c local/wrangler.toml",
     "presecret": "node scripts/ensure-config.mjs",
-    "presecret:list": "node scripts/ensure-config.mjs"
+    "presecret:list": "node scripts/ensure-config.mjs",
+    "test:e2e": "playwright test",
+    "qa:serve": "npm run build && node e2e/server.mjs"
   },
   "dependencies": {
     "react": "^18.3.1",
@@ -25,6 +27,7 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261104.1",
+    "@playwright/test": "^1.63.0",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.3",

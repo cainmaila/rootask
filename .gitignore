@@ -9,3 +9,6 @@ dev-dist/
 local/
 # 舊版放在根目錄的個人設定
 /wrangler.toml
+# Playwright
+test-results/
+playwright-report/

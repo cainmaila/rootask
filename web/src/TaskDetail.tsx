@@ -221,6 +221,7 @@ export function TaskDetail({ n, ctx, close, full = false, expand, open }: Props)
       <label className="field">
         <span>狀態</span>
         <select
+          aria-label="狀態"
           value={status.id}
           disabled={busy}
           onChange={(e) => {
@@ -242,6 +243,7 @@ export function TaskDetail({ n, ctx, close, full = false, expand, open }: Props)
       <label className="field">
         <span>父任務</span>
         <select
+          aria-label="父任務"
           value={task.parent ?? ""}
           disabled={busy}
           onChange={(e) => {

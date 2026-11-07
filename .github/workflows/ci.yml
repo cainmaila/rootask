@@ -18,6 +18,18 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+      # 介面自動化測試（#51）：建置後的前端＋假 GitHub
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+      - name: 上傳失敗的截圖與追蹤
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
       - run: npx wrangler deploy --dry-run -c local.example/wrangler.toml --outdir /tmp/worker-dry
 
   # main 上的檢查通過後自動部署。沒設 CLOUDFLARE_API_TOKEN 的 repo（例如別人的 fork）會跳過。
