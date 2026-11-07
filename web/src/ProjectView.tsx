@@ -97,16 +97,26 @@ export function ProjectView({
   pinned.current = [selected, fullTask].filter((x): x is number => x !== null);
   const showDoneRef = useRef(showDone);
   showDoneRef.current = showDone;
+  // 這次開啟後才完成的任務，留在清單上到重新整理為止，改錯了還能馬上改回來（#63）
+  const keepDone = useRef(new Set<number>());
+  const prevTree = useRef<LoadedTree | null>(null);
 
   const reload = useCallback(async () => {
     try {
       const [cfg, tree, people, permission, user] = await Promise.all([
         loadConfig(owner, repo),
-        loadTree(owner, repo, { includeClosed: showDoneRef.current, pin: pinned.current }),
+        loadTree(owner, repo, { includeClosed: showDoneRef.current, pin: [...pinned.current, ...keepDone.current] }),
         listAssignable(owner, repo),
         myPermission(owner, repo),
         gh<{ login: string }>("/user"),
       ]);
+      const prev = prevTree.current;
+      if (prev) {
+        for (const t of tree.byNumber.values()) {
+          if (t.state === "CLOSED" && prev.byNumber.get(t.number)?.state === "OPEN") keepDone.current.add(t.number);
+        }
+      }
+      prevTree.current = tree;
       setCtx({ owner, repo, cfg, tree, people, permission, me: user.login });
       setError(null);
     } catch (e) {
@@ -119,6 +129,7 @@ export function ProjectView({
     setShowDone(next);
     showDoneRef.current = next;
     writeShowDone(owner, repo, next);
+    if (!next) keepDone.current.clear(); // 明確切回隱藏，就全部照規則隱藏
     setLoadingDone(true);
     await reload();
     setLoadingDone(false);

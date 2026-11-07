@@ -84,6 +84,27 @@ test.describe("桌面", () => {
     await expect.poll(() => rows(page)).toEqual(["行銷活動", "整理專案文件", LONG, "官網改版"]);
   });
 
+  test("#63 剛完成的任務留在清單上，其他寫入後也不消失，重新整理才隱藏", async ({ page }) => {
+    await openProject(page);
+    await row(page, "整理專案文件").locator(".node-title").click();
+    const panel = page.locator("aside.detail");
+    await panel.getByLabel("狀態", { exact: true }).selectOption("done");
+    await expect(page.getByText("✓ 已同步")).toBeVisible();
+    await panel.getByRole("button", { name: "關閉" }).first().click();
+    // 其他寫入（調整順序）會重新載入，完成的任務仍要留著
+    await row(page, "行銷活動").locator(".grip").focus();
+    await page.keyboard.press("ArrowUp");
+    await expect.poll(() => rows(page)).toEqual(["行銷活動", "官網改版", "整理專案文件", LONG]);
+    // 改回來也還在
+    await row(page, "整理專案文件").locator(".node-title").click();
+    await panel.getByLabel("狀態", { exact: true }).selectOption("todo");
+    await expect(page.getByText("✓ 已同步")).toBeVisible();
+    await panel.getByLabel("狀態", { exact: true }).selectOption("done");
+    await expect(page.getByText("✓ 已同步")).toBeVisible();
+    await page.reload();
+    await expect.poll(() => rows(page)).toEqual(["行銷活動", "官網改版", LONG]);
+  });
+
   test("#64 順序說明已更新", async ({ page }) => {
     await openProject(page);
     await row(page, "整理專案文件").locator(".node-title").click();
