@@ -100,6 +100,8 @@ npm run deploy
 
 其他成員只要是該 repo 的 collaborator（**要先接受 GitHub 的成員邀請**），登入後就會直接看到這個專案。
 
+其他人要用自己的 repo（尤其是組織的 repo）時，需要把 App 安裝到 repo 所屬的帳號，常見問題見 [README：把自己的 repo 加進 Rootask](../README.md#使用者把自己的-repo-加進-rootask)。
+
 ## 自動部署（選用）
 
 設定後，每次 push 到 `main` 且 CI 檢查通過，就會自動部署到 Cloudflare，不用再手動 `npm run deploy`。
