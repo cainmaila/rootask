@@ -29,6 +29,9 @@ function fmtTime(iso: string | null): string {
 
 const MAX_ASSIGNEES = 10;
 
+/** 沒存到的說明草稿：切到別的任務再回來還在（#67、#71 QA 觀察） */
+const failedDrafts = new Map<string, string>();
+
 interface Props {
   n: number;
   ctx: ProjectCtx;
@@ -50,14 +53,17 @@ export function TaskDetail({ n, ctx, close, full = false, expand, open }: Props)
   const can = abilitiesOf(ctx.permission);
   const canWrite = can.edit;
 
+  const draftKey = `${owner}/${repo}#${n}`;
   const [title, setTitle] = useState(task.title);
-  const [body, setBody] = useState(task.body ?? "");
-  const [editingBody, setEditingBody] = useState(false);
+  const [body, setBody] = useState(() => failedDrafts.get(draftKey) ?? task.body ?? "");
+  const [editingBody, setEditingBody] = useState(() => failedDrafts.has(draftKey));
   const [comments, setComments] = useState<Comment[] | null>(null);
   const [draft, setDraft] = useState("");
   const [uploading, setUploading] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(() =>
+    failedDrafts.has(draftKey) ? "說明沒有存到，內容還在編輯框裡，可以再按一次儲存。" : null,
+  );
   const [meta, setMeta] = useState<TaskMeta>(task.meta);
   const [actual, setActual] = useState<ActualTimes | null>(null);
   // 同步中（含按重試、或從列表拖曳）欄位一律鎖住，免得以為沒反應又改一次（#70）
@@ -69,9 +75,10 @@ export function TaskDetail({ n, ctx, close, full = false, expand, open }: Props)
     if (!editingBody) setBody(task.body ?? "");
   }, [task.body, editingBody]);
   // 說明沒存到後，按頂端列的「重試」存好了：關掉編輯框（#67）
-  const [bodyFailed, setBodyFailed] = useState(false);
+  const [bodyFailed, setBodyFailed] = useState(() => failedDrafts.has(draftKey));
   useEffect(() => {
     if (bodyFailed && editingBody && (task.body ?? "") === body) {
+      failedDrafts.delete(draftKey);
       setBodyFailed(false);
       setEditingBody(false);
       setErr(null);
@@ -147,11 +154,13 @@ export function TaskDetail({ n, ctx, close, full = false, expand, open }: Props)
       optimistic: (t) => patchTask(t, n, { body: text }),
       write: () => updateBody(owner, repo, n, { text }),
     });
+    if (ok) failedDrafts.delete(draftKey);
     // 沒存到：打的內容放回編輯框，不會因為關掉錯誤訊息就不見（#67）
     if (!ok) {
       setBody(text);
       setEditingBody(true);
       setBodyFailed(true);
+      failedDrafts.set(draftKey, text);
       setErr("說明沒有存到，內容還在編輯框裡，可以再按一次儲存。");
     }
   }
@@ -250,6 +259,9 @@ export function TaskDetail({ n, ctx, close, full = false, expand, open }: Props)
               <button
                 className="btn"
                 onClick={() => {
+                  failedDrafts.delete(draftKey);
+                  setBodyFailed(false);
+                  setErr(null);
                   setBody(task.body ?? "");
                   setEditingBody(false);
                 }}

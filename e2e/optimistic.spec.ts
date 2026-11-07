@@ -223,3 +223,63 @@ test.describe("樂觀更新：QA 回報", () => {
     await expect(select).toBeEnabled();
   });
 });
+
+test.describe("樂觀更新：QA 回報（第二輪）", () => {
+  test.skip(({ isMobile }) => !!isMobile, "只在桌面");
+
+  test.beforeEach(async ({ page }) => {
+    await reset(page);
+  });
+
+  test("#71 桌面頁面往下捲、有多則錯誤時，任務詳情的關閉鈕不被蓋住", async ({ page }) => {
+    await page.setViewportSize({ width: 1200, height: 420 });
+    await page.request.post("/__fail?times=3&method=PATCH");
+    await openProject(page);
+    await row(page, "整理專案文件").locator(".node-title").click();
+    const panel = page.locator("aside.detail");
+    await panel.getByLabel("狀態", { exact: true }).selectOption("doing");
+    await expect(page.getByRole("alert")).toContainText("改狀態");
+    await panel.locator(".title-input").fill("新標題");
+    await panel.locator(".title-input").blur();
+    await expect(page.getByRole("alert")).toContainText("更新標題");
+    await panel.getByRole("button", { name: "amy" }).click();
+    await expect(page.getByRole("alert")).toContainText("更新分配人");
+    // 把樹展開讓頁面夠長，再往下捲
+    for (const t of ["官網改版", "行銷活動", "首頁設計", "後台 API"]) await row(page, t).locator(".twisty").click();
+    await page.evaluate(() => window.scrollTo(0, 300));
+    await panel.evaluate((el) => (el.scrollTop = 0)); // 面板自己的捲動回到最上面
+    await page.waitForTimeout(200);
+    expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+    // 不讓 Playwright 自己捲動：直接看按鈕所在位置最上層是誰
+    const close = panel.getByRole("button", { name: "關閉" });
+    const hit = await close.evaluate((b) => {
+      const r = b.getBoundingClientRect();
+      const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+      return r.y >= 0 && !!top && b.contains(top);
+    });
+    expect(hit).toBe(true);
+    const box = (await close.boundingBox())!;
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+    await expect(panel).toHaveCount(0);
+    await expect(page.getByRole("alert").locator(".sync-row")).toHaveCount(3);
+  });
+
+  test("說明沒存到後切到別的任務再回來，草稿還在", async ({ page }) => {
+    await openProject(page);
+    await row(page, "整理專案文件").locator(".node-title").click();
+    const panel = page.locator("aside.detail");
+    await page.request.post("/__fail?times=1&method=PATCH&path=/issues/13");
+    await panel.getByRole("button", { name: /加上說明/ }).click();
+    await panel.locator("textarea").first().fill("不能弄丟的說明");
+    await panel.getByRole("button", { name: "儲存" }).click();
+    await expect(page.getByRole("alert")).toContainText("更新說明（#13）失敗");
+    await page.getByRole("alert").getByRole("button", { name: "關閉" }).click();
+    await row(page, "行銷活動").locator(".node-title").click();
+    await row(page, "整理專案文件").locator(".node-title").click();
+    await expect(panel.locator("textarea").first()).toHaveValue("不能弄丟的說明");
+    await expect(panel).toContainText("說明沒有存到");
+    await panel.getByRole("button", { name: "儲存" }).click();
+    await expect(page.getByText("✓ 已同步")).toBeVisible();
+    await expect(panel.locator(".description")).toContainText("不能弄丟的說明");
+  });
+});

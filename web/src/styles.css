@@ -148,7 +148,13 @@ textarea { resize: vertical; }
   padding: 14px 16px; display: flex; flex-direction: column; gap: 12px;
   align-self: start;
 }
-@media (min-width: 900px) { .detail { position: sticky; top: 70px; max-height: calc(100vh - 90px); overflow: auto; } }
+/* 桌面：面板黏在頂端列下方；頂端列因為多則同步失敗變高時跟著往下（#71） */
+@media (min-width: 900px) {
+  .detail {
+    position: sticky; top: calc(var(--topbar-h, 56px) + 14px);
+    max-height: calc(100vh - var(--topbar-h, 56px) - 34px); overflow: auto;
+  }
+}
 @media (max-width: 899px) {
   .detail {
     position: fixed; inset: auto 0 0 0; z-index: 10; overflow: auto;
