@@ -184,6 +184,8 @@ App 一律設為公開；存取範圍仍由「安裝在哪些 repo」與「使�
     改狀態先讀 GitHub 上最新的標籤，只換狀態標籤，仍一次 PATCH 寫完（#32）；分配人只送有變的那一位（`POST`／`DELETE /issues/{n}/assignees`）。
   - 局部重讀時順便讀 repo 的已關閉總數，「顯示已完成（N）」的數字才對（#74）。
   - 標題欄 Enter 存、Esc 取消（#76）。
+  - **同一欄位兩人同時改：後存的贏，不提示**（Cain 決定 A，2026-11-07，#77）。編輯中別人的修改不打斷編輯；
+    自己真的改過再存，就以自己的為準。沒改就不寫回（#72），所以只有「兩人都真的改了同一欄位」才會覆蓋。
   - **實測（demoTask）：子任務的新增、移除、排序都不會改變 issue 的 `updated_at`**，issue 列表看不到。
     新增／移除（換父任務）會在 repo 的 issue events 留下 `sub_issue_added/removed`、`parent_issue_added/removed`，
     所以同時用條件式請求檢查 `GET /repos/{o}/{r}/issues/events`，有這類新事件就重讀相關任務。
