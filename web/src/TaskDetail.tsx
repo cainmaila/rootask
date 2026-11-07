@@ -5,7 +5,7 @@ import type { Mutation, ProjectCtx } from "./ProjectView";
 import { patchTask, reparent, withStatus } from "./optimistic";
 import { AttachTextarea } from "./AttachTextarea";
 import { Markdown } from "./Markdown";
-import { track, useSync } from "./sync";
+import { dismissSyncError, track, useSync } from "./sync";
 import {
   abilitiesOf,
   actualTimes,
@@ -259,6 +259,8 @@ export function TaskDetail({ n, ctx, close, full = false, expand, open }: Props)
               <button
                 className="btn"
                 onClick={() => {
+                  // 取消＝不要這段了：頂端那則失敗也拿掉，免得按重試又寫進去
+                  dismissSyncError(`更新說明|${n}`);
                   failedDrafts.delete(draftKey);
                   setBodyFailed(false);
                   setErr(null);

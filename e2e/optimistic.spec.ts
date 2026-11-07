@@ -282,4 +282,18 @@ test.describe("樂觀更新：QA 回報（第二輪）", () => {
     await expect(page.getByText("✓ 已同步")).toBeVisible();
     await expect(panel.locator(".description")).toContainText("不能弄丟的說明");
   });
+
+  test("說明沒存到後按取消：草稿清掉，頂端那則失敗也一起拿掉", async ({ page }) => {
+    await openProject(page);
+    await row(page, "整理專案文件").locator(".node-title").click();
+    const panel = page.locator("aside.detail");
+    await page.request.post("/__fail?times=1&method=PATCH&path=/issues/13");
+    await panel.getByRole("button", { name: /加上說明/ }).click();
+    await panel.locator("textarea").first().fill("後來不要了");
+    await panel.getByRole("button", { name: "儲存" }).click();
+    await expect(page.getByRole("alert")).toContainText("更新說明（#13）失敗");
+    await panel.getByRole("button", { name: "取消" }).click();
+    await expect(page.getByRole("alert")).toHaveCount(0);
+    await expect(panel).not.toContainText("後來不要了");
+  });
 });
