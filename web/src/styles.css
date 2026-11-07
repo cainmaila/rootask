@@ -229,17 +229,39 @@ textarea { resize: vertical; }
   .detail.full { position: static; inset: auto; max-height: none; border-radius: 14px; box-shadow: none; }
 }
 
-/* 拖曳排序（#42） */
-.grip { color: var(--muted); opacity: 0; cursor: grab; font-size: 12px; letter-spacing: -2px; padding: 0 2px; user-select: none; }
-.node:hover .grip { opacity: 0.6; }
-.node[draggable="true"] { position: relative; }
+/* 拖曳排序（#42）＋拖曳手把（#54） */
+.grip {
+  flex-shrink: 0; display: grid; place-items: center; width: 22px; align-self: stretch;
+  border: 0; background: none; padding: 0; border-radius: 6px;
+  color: var(--muted); opacity: 0; cursor: grab; font-size: 12px; letter-spacing: -2px;
+  /* 只有手把會攔下觸控手勢；列的其他地方照常捲動、點擊 */
+  touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+}
+.node:hover .grip, .grip:focus-visible { opacity: 0.7; }
+.grip:hover { background: var(--sel); opacity: 1; }
+.grip:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.grip:disabled { cursor: progress; }
+.node { position: relative; }
 li.dragging > .node { opacity: 0.4; }
 .node.drop-before::before, .node.drop-after::after {
-  content: ""; position: absolute; left: 24px; right: 4px; height: 2px; background: var(--accent); border-radius: 2px; pointer-events: none;
+  content: ""; position: absolute; left: 24px; right: 4px; height: 3px; background: var(--accent); border-radius: 2px; pointer-events: none;
 }
-.node.drop-before::before { top: -1px; }
-.node.drop-after::after { bottom: -1px; }
-@media (hover: none) { .grip { display: none; } }
+.node.drop-before::before { top: -2px; }
+.node.drop-after::after { bottom: -2px; }
+body.tree-dragging, body.tree-dragging * { cursor: grabbing !important; user-select: none; -webkit-user-select: none; }
+.drag-ghost {
+  position: fixed; left: 0; top: 0; z-index: 50; pointer-events: none;
+  max-width: 60vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  padding: 6px 12px; border-radius: 8px; font-size: 14px;
+  background: var(--surface); color: var(--ink); border: 1px solid var(--accent);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.25);
+}
+/* 觸控裝置：手把常駐、加大到手指好按的尺寸，列也加高 */
+@media (pointer: coarse) {
+  .grip { opacity: 0.6; width: 36px; min-height: 44px; font-size: 16px; }
+  .node-main { min-height: 44px; }
+  .twisty { min-height: 44px; }
+}
 
 /* Markdown 預覽（#44） */
 .md-tabs { display: flex; align-items: center; gap: 2px; border-bottom: 1px solid var(--line); }

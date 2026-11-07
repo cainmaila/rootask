@@ -5,16 +5,15 @@ import { isOverdue, todayLocal } from "../../shared/meta";
 import { track, useSync } from "./sync";
 import { MAX_CHILDREN, MAX_DEPTH, createTask, depthOf, statusOf } from "./tasks";
 
-/** 拖曳排序（#42）的共用狀態，由 ProjectView 提供 */
+/** 拖曳排序的共用狀態，由 ProjectView 提供（#42、#54） */
 export interface DragCtx {
   dragging: number | null;
-  setDragging: (n: number | null) => void;
-  /** 目前滑鼠所在的放置位置 */
+  /** 目前指標所在的放置位置 */
   over: { n: number; position: "before" | "after" } | null;
-  setOver: (o: DragCtx["over"]) => void;
-  drop: (target: number, position: "before" | "after") => void;
-  /** 能不能放在這張的前後（擋自己的子孫、超過 8 層等） */
-  canDrop: (target: number) => boolean;
+  /** 手把的 onPointerDown：只有手把能開始拖曳 */
+  start: (n: number, e: React.PointerEvent<HTMLElement>) => void;
+  /** 鍵盤：手把上按上下鍵移動一格 */
+  moveBy: (n: number, dir: -1 | 1) => void;
 }
 
 interface Props {
@@ -74,44 +73,24 @@ export function TaskNode({ n, ctx, expanded, toggle, selected, select, drag }: P
       <div
         className={`node ${selected === n ? "sel" : ""} cat-${status.category} ${dropClass} ${syncing ? "syncing" : ""}`}
         aria-busy={syncing}
-        draggable={!syncing}
-        onDragStart={(e) => {
-          e.dataTransfer.effectAllowed = "move";
-          e.dataTransfer.setData("text/plain", `#${n}`);
-          drag.setDragging(n);
-        }}
-        onDragEnd={() => {
-          drag.setDragging(null);
-          drag.setOver(null);
-        }}
-        // dragenter 和 dragover 都要 preventDefault 才算放置目標，否則放開時不會觸發 drop（#42 實測）
-        onDragEnter={(e) => {
-          if (drag.dragging !== null && drag.dragging !== n && drag.canDrop(n)) e.preventDefault();
-        }}
-        onDragOver={(e) => {
-          if (drag.dragging === null || drag.dragging === n || !drag.canDrop(n)) return;
-          e.preventDefault();
-          e.dataTransfer.dropEffect = "move";
-          const r = e.currentTarget.getBoundingClientRect();
-          const position = e.clientY < r.top + r.height / 2 ? "before" : "after";
-          if (drag.over?.n !== n || drag.over.position !== position) drag.setOver({ n, position });
-        }}
-        onDragLeave={(e) => {
-          if (!e.currentTarget.contains(e.relatedTarget as Node | null) && drag.over?.n === n) drag.setOver(null);
-        }}
-        onDrop={(e) => {
-          e.preventDefault();
-          // 放開當下直接用滑鼠位置判斷上／下半，不依賴 dragover 記下的狀態
-          // （真實拖曳時 dragleave 可能先把它清掉，#42 實測）
-          const r = e.currentTarget.getBoundingClientRect();
-          const pos = e.clientY < r.top + r.height / 2 ? "before" : "after";
-          drag.setOver(null);
-          drag.drop(n, pos);
-        }}
+        data-node={n}
       >
-        <span className="grip" aria-hidden title="拖曳調整順序">
-          ⋮⋮
-        </span>
+        <button
+          type="button"
+          className="grip"
+          aria-label={`拖曳調整「${task.title}」的順序，也可以用上下鍵移動`}
+          title="拖曳調整順序（也可用上下鍵）"
+          disabled={syncing}
+          onPointerDown={(e) => drag.start(n, e)}
+          onKeyDown={(e) => {
+            if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+              e.preventDefault();
+              drag.moveBy(n, e.key === "ArrowUp" ? -1 : 1);
+            }
+          }}
+        >
+          <span aria-hidden>⋮⋮</span>
+        </button>
         <button
           className="twisty"
           aria-label={open ? "收合" : "展開"}

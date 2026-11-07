@@ -5,6 +5,7 @@ import { TaskDetail } from "./TaskDetail";
 import { TaskNode, type DragCtx } from "./TaskNode";
 import { gh } from "./api";
 import { track } from "./sync";
+import { useTreeDrag, type DropPosition } from "./useTreeDrag";
 import {
   createTask,
   isDescendant,
@@ -12,7 +13,9 @@ import {
   loadTree,
   moveBlockReason,
   myPermission,
+  neighbor,
   reorderTask,
+  type TaskTree,
   type Person,
   type LoadedTree,
 } from "./tasks";
@@ -46,6 +49,18 @@ function writeShowDone(owner: string, repo: string, v: boolean) {
   }
 }
 
+/** 能不能把 moving 放到 target 的前後（擋放進自己的子孫、換父任務後超過 8 層等） */
+function canDropIn(tree: TaskTree, moving: number, target: number): boolean {
+  if (moving === target || !tree.byNumber.has(target)) return false;
+  if (isDescendant(tree, target, moving)) return false;
+  const parentOf = (n: number) => {
+    const p = tree.byNumber.get(n)?.parent ?? null;
+    return p !== null && tree.byNumber.has(p) ? p : null;
+  };
+  const tp = parentOf(target);
+  return tp === parentOf(moving) || !moveBlockReason(tree, moving, tp);
+}
+
 const projectHash = (owner: string, repo: string) => `#/p/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
 const taskHash = (owner: string, repo: string, n: number) => `${projectHash(owner, repo)}/t/${n}`;
 
@@ -57,8 +72,6 @@ export function ProjectView({ owner, repo, fullTask = null }: { owner: string; r
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const [newTitle, setNewTitle] = useState("");
   const [busy, setBusy] = useState(false);
-  const [dragging, setDragging] = useState<number | null>(null);
-  const [over, setOver] = useState<DragCtx["over"]>(null);
   const [showDone, setShowDone] = useState(() => readShowDone(owner, repo));
   const [loadingDone, setLoadingDone] = useState(false);
 
@@ -94,6 +107,31 @@ export function ProjectView({ owner, repo, fullTask = null }: { owner: string; r
     setLoadingDone(false);
   }
 
+  /** 拖曳與鍵盤共用：寫回 GitHub，期間顯示同步中（#53） */
+  function reorder(moving: number, target: number, position: DropPosition) {
+    if (!ctx) return;
+    const tree = ctx.tree;
+    void track(
+      "調整順序",
+      async () => {
+        if (await reorderTask(owner, repo, tree, moving, target, position)) await reload();
+      },
+      [moving],
+    ).catch(() => {});
+  }
+
+  function moveBy(n: number, dir: -1 | 1) {
+    const nb = ctx && neighbor(ctx.tree, n, dir);
+    if (nb) reorder(n, nb.target, nb.position);
+  }
+
+  // 手把拖曳（#54）；hook 必須在下面的提早 return 之前呼叫
+  const treeDrag = useTreeDrag({
+    canDrop: (moving, target) => !!ctx && canDropIn(ctx.tree, moving, target),
+    drop: reorder,
+    titleOf: (n) => ctx?.tree.byNumber.get(n)?.title ?? `#${n}`,
+  });
+
   useEffect(() => {
     void reload();
     // 簡易同步：回到畫面時重新讀取
@@ -107,35 +145,7 @@ export function ProjectView({ owner, repo, fullTask = null }: { owner: string; r
 
   const full: ProjectCtx = { ...ctx, reload };
 
-  const parentOf = (n: number) => {
-    const p = ctx.tree.byNumber.get(n)?.parent ?? null;
-    return p !== null && ctx.tree.byNumber.has(p) ? p : null;
-  };
-  const drag: DragCtx = {
-    dragging,
-    setDragging,
-    over,
-    setOver,
-    canDrop: (target) => {
-      if (dragging === null || dragging === target) return false;
-      if (isDescendant(ctx.tree, target, dragging)) return false; // 不能放進自己的子孫之間
-      const tp = parentOf(target);
-      return tp === parentOf(dragging) || !moveBlockReason(ctx.tree, dragging, tp);
-    },
-    drop: (target, position) => {
-      const moving = dragging;
-      setDragging(null);
-      if (moving === null) return;
-      const tree = ctx.tree;
-      void track(
-        "調整順序",
-        async () => {
-          if (await reorderTask(owner, repo, tree, moving, target, position)) await reload();
-        },
-        [moving],
-      ).catch(() => {});
-    },
-  };
+  const drag: DragCtx = { dragging: treeDrag.dragging, over: treeDrag.over, start: treeDrag.start, moveBy };
 
   // 整頁任務檢視（#41）：網址 #/p/<owner>/<repo>/t/<n>，可直接分享
   if (fullTask !== null) {
