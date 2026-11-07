@@ -311,7 +311,10 @@ export class FakeGitHub {
     const r = this.repo(m[1], m[2]);
     if (!r) return { status: 404, json: { message: "Not Found" } };
     const rest = m[3] ?? "";
-    const canWrite = this.me.role !== "read";
+    // 和真實 GitHub 一樣（#65）：triage 可以改標籤、開關、指派、加子任務，不能改標題與內文
+    const canWrite = ["admin", "maintain", "write"].includes(this.me.role);
+    const canTriage = this.me.role !== "read";
+    const deny = { status: 403, json: { message: "沒有寫入權限" } };
 
     if (rest === "") {
       const role = this.me.role;
@@ -350,9 +353,9 @@ export class FakeGitHub {
       }
     }
     if (rest === "/issues" && method === "POST") {
-      if (!canWrite) return { status: 403, json: { message: "沒有寫入權限" } };
+      // 能讀就能開 issue；沒有 triage 權限時 GitHub 會忽略標籤
       if (!req.body.title?.trim()) return { status: 422, json: { message: "標題不能是空的" } };
-      const n = this.#create(r, { title: req.body.title, body: req.body.body, labels: req.body.labels ?? [] });
+      const n = this.#create(r, { title: req.body.title, body: req.body.body, labels: canTriage ? (req.body.labels ?? []) : [] });
       return { status: 201, json: this.#rest(r.issues.get(n)) };
     }
 
@@ -367,8 +370,9 @@ export class FakeGitHub {
     if (sub === "") {
       if (method === "GET") return { status: 200, json: this.#rest(issue) };
       if (method === "PATCH") {
-        if (!canWrite) return { status: 403, json: { message: "沒有寫入權限" } };
         const b = req.body;
+        if (!canTriage) return deny;
+        if (!canWrite && (b.title !== undefined || b.body !== undefined)) return deny;
         if (b.title !== undefined) {
           if (!String(b.title).trim()) return { status: 422, json: { message: "標題不能是空的" } };
           issue.title = b.title;
@@ -415,6 +419,7 @@ export class FakeGitHub {
       if (method === "GET")
         return { status: 200, json: (r.children.get(issue.number) ?? []).map((k) => this.#rest(r.issues.get(k))) };
       if (method === "POST") {
+        if (!canTriage) return deny;
         const child = [...r.issues.values()].find((x) => x.id === req.body.sub_issue_id);
         if (!child) return { status: 404, json: { message: "找不到子任務" } };
         if (child.parent !== null && !req.body.replace_parent) return { status: 422, json: { message: "已經有父任務" } };
@@ -428,6 +433,7 @@ export class FakeGitHub {
       }
     }
     if (sub === "/sub_issue" && method === "DELETE") {
+      if (!canWrite) return deny;
       const child = [...r.issues.values()].find((x) => x.id === req.body.sub_issue_id);
       if (!child || child.parent !== issue.number) return { status: 404, json: { message: "不是這個任務的子任務" } };
       r.children.set(issue.number, (r.children.get(issue.number) ?? []).filter((k) => k !== child.number));
@@ -435,6 +441,7 @@ export class FakeGitHub {
       return { status: 200, json: this.#rest(issue) };
     }
     if (sub === "/sub_issues/priority" && method === "PATCH") {
+      if (!canWrite) return deny;
       const list = r.children.get(issue.number) ?? [];
       const byId = (id) => [...r.issues.values()].find((x) => x.id === id)?.number;
       const moving = byId(req.body.sub_issue_id);

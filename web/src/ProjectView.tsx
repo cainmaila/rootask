@@ -19,6 +19,7 @@ import {
   loadTree,
   moveBlockReason,
   myPermission,
+  abilitiesOf,
   neighbor,
   planReorder,
   statusOf,
@@ -289,15 +290,16 @@ export function ProjectView({
 
   const full: ProjectCtx = { ...ctx, reload, mutate, refresh: (ns: number[]) => refresh(ns), reorder };
 
-  // 唯讀成員不能新增、排序、修改（#59）
-  const canWrite = ["admin", "maintain", "write"].includes(ctx.permission);
+  // 唯讀成員不能新增、排序、修改（#59）；triage 可以新增、改狀態、指派，不能排序（#65）
+  const can = abilitiesOf(ctx.permission);
   const drag: DragCtx = {
     dragging: treeDrag.dragging,
     // 放到最後時，放置線畫在清單底部，不畫在最後一列上（它可能展開著子任務）
     over: treeDrag.over?.end ? null : treeDrag.over,
     start: treeDrag.start,
     moveBy,
-    enabled: canWrite,
+    enabled: can.edit,
+    canCreate: can.triage,
   };
 
   // 整頁任務檢視（#41）：網址 #/p/<owner>/<repo>/t/<n>，可直接分享
@@ -440,12 +442,17 @@ export function ProjectView({
       ) : (
         <div className={`split ${selected !== null ? "has-detail" : ""}`}>
           <section className="tree">
-            {!canWrite && (
+            {!can.triage && (
               <p className="banner small" role="note">
                 你在這個專案只有讀取權限：可以瀏覽與留言，不能新增、修改或調整順序。
               </p>
             )}
-            {canWrite && (
+            {can.triage && !can.edit && (
+              <p className="banner small" role="note">
+                你在這個專案是分類（triage）權限：可以新增任務、改狀態、指派與留言，不能修改標題、說明、日期或調整順序。
+              </p>
+            )}
+            {can.triage && (
               <form
                 className="add-row"
                 onSubmit={(e) => {
@@ -494,7 +501,7 @@ export function ProjectView({
             )}
             {!filtering && roots.length === 0 && (
               <p className="muted empty">
-                {!showDone && ctx.tree.closedCount > 0 ? "目前沒有未完成的任務 🎉" : canWrite ? "還沒有任務，從上面新增第一個吧。" : "這個專案還沒有任務。"}
+                {!showDone && ctx.tree.closedCount > 0 ? "目前沒有未完成的任務 🎉" : can.triage ? "還沒有任務，從上面新增第一個吧。" : "這個專案還沒有任務。"}
               </p>
             )}
             {filtering && !showDone && ctx.tree.closedCount > 0 && roots.length > 0 && (

@@ -7,6 +7,7 @@ import { AttachTextarea } from "./AttachTextarea";
 import { Markdown } from "./Markdown";
 import { track, useSync } from "./sync";
 import {
+  abilitiesOf,
   actualTimes,
   addComment,
   depthOf,
@@ -45,8 +46,9 @@ export function TaskDetail({ n, ctx, close, full = false, expand, open }: Props)
   const { owner, repo, cfg } = ctx;
   const status = statusOf(task, cfg.config);
   const threshold = cfg.config.attachment_threshold_mb ?? 10;
-  // 唯讀成員：可以看、可以留言，不能修改（#59）
-  const canWrite = ["admin", "maintain", "write"].includes(ctx.permission);
+  // 唯讀成員：可以看、可以留言，不能修改（#59）；triage：可以改狀態與指派，其他不行（#65）
+  const can = abilitiesOf(ctx.permission);
+  const canWrite = can.edit;
 
   const [title, setTitle] = useState(task.title);
   const [body, setBody] = useState(task.body ?? "");
@@ -281,7 +283,7 @@ export function TaskDetail({ n, ctx, close, full = false, expand, open }: Props)
         <select
           aria-label="狀態"
           value={status.id}
-          disabled={locked || !canWrite}
+          disabled={locked || !can.triage}
           onChange={(e) => {
             const s = cfg.config.statuses.find((x) => x.id === e.target.value)!;
             void run("改狀態", {
@@ -390,7 +392,7 @@ export function TaskDetail({ n, ctx, close, full = false, expand, open }: Props)
             <button
               key={p.login}
               className={`person ${assigned.has(p.login) ? "on" : ""}`}
-              disabled={!canWrite || locked || (!assigned.has(p.login) && assigned.size >= MAX_ASSIGNEES)}
+              disabled={!can.triage || locked || (!assigned.has(p.login) && assigned.size >= MAX_ASSIGNEES)}
               onClick={() => toggleAssignee(p.login)}
             >
               <img className="avatar" src={p.avatarUrl} alt="" />

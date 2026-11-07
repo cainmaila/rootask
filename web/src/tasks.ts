@@ -431,7 +431,22 @@ export async function listAssignable(owner: string, repo: string): Promise<Perso
 }
 
 export async function myPermission(owner: string, repo: string): Promise<string> {
-  const r = await gh<{ permissions?: { admin?: boolean; maintain?: boolean; push?: boolean } }>(`/repos/${owner}/${repo}`);
+  const r = await gh<{ permissions?: { admin?: boolean; maintain?: boolean; push?: boolean; triage?: boolean } }>(
+    `/repos/${owner}/${repo}`,
+  );
   const p = r.permissions ?? {};
-  return p.admin ? "admin" : p.maintain ? "maintain" : p.push ? "write" : "read";
+  return p.admin ? "admin" : p.maintain ? "maintain" : p.push ? "write" : p.triage ? "triage" : "read";
+}
+
+/** 在這個專案能做什麼（#59、#65） */
+export interface Abilities {
+  /** 改標題、說明、日期、順序、父任務（要有 push 權限） */
+  edit: boolean;
+  /** 改狀態、指派、新增任務與子任務（triage 以上；GitHub 上 triage 能改標籤、開關、指派、加子任務） */
+  triage: boolean;
+}
+
+export function abilitiesOf(permission: string): Abilities {
+  const edit = ["admin", "maintain", "write"].includes(permission);
+  return { edit, triage: edit || permission === "triage" };
 }

@@ -8,6 +8,16 @@
 - 自己的顯示介面＋自己的客製流程；**登入、權限、資料全部用 GitHub**。
 - **一個專案＝一個既有的 GitHub repo**。App 不建立新 repo（不申請 Administration 權限）。
 - 參與者只限該 repo 的成員（collaborator / team）。被分配人必須是成員，每個任務最多 10 位。
+- **成員能做什麼跟著 GitHub 的 repo 權限**（#59、#65，2026-11-07 Cain 決定 triage 用 B）：
+
+  | 權限 | 能做的事 |
+  |---|---|
+  | read | 瀏覽、留言 |
+  | triage | ＋新增任務與子任務、改狀態、指派（GitHub 上 triage 能改標籤、開關 issue、指派、加 sub-issue） |
+  | write／maintain／admin | ＋改標題、說明、日期、順序、父任務 |
+  | maintain／admin | ＋專案設定 |
+
+  App 依權限把做不到的欄位停用或隱藏，並在頂端提示；狀態轉換規則另外照 `.taskapp/config.yml` 判斷。
 - 盡量**零成本**：GitHub Free ＋ Cloudflare Workers 免費方案。
 
 ## 架構

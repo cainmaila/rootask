@@ -14,8 +14,10 @@ export interface DragCtx {
   start: (n: number, e: React.PointerEvent<HTMLElement>) => void;
   /** 鍵盤：手把上按上下鍵移動一格 */
   moveBy: (n: number, dir: -1 | 1) => void;
-  /** 沒有寫入權限時不能排序（#59） */
+  /** 沒有寫入權限時不能排序（#59、#65） */
   enabled: boolean;
+  /** 能不能新增子任務（triage 以上，#65） */
+  canCreate: boolean;
 }
 
 /** 篩選結果（#47）：null 表示沒有篩選 */
@@ -49,7 +51,7 @@ export function TaskNode({ view, n, ctx, expanded, toggle, selected, select, dra
   const [adding, setAdding] = useState(false);
   const [title, setTitle] = useState("");
   const [busy, setBusy] = useState(false);
-  const canAddChild = drag.enabled && depthOf(ctx.tree, n) < MAX_DEPTH && kidTotal < MAX_CHILDREN;
+  const canAddChild = drag.canCreate && depthOf(ctx.tree, n) < MAX_DEPTH && kidTotal < MAX_CHILDREN;
 
   async function addChild() {
     if (!title.trim()) return;
