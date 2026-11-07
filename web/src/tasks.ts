@@ -414,6 +414,7 @@ export interface Comment {
   id: number;
   body: string;
   created_at: string;
+  updated_at?: string;
   user: { login: string; avatar_url: string } | null;
 }
 
@@ -423,6 +424,14 @@ export function listComments(owner: string, repo: string, n: number): Promise<Co
 
 export function addComment(owner: string, repo: string, n: number, body: string): Promise<Comment> {
   return gh<Comment>(`/repos/${owner}/${repo}/issues/${n}/comments`, { method: "POST", json: { body } });
+}
+
+export function editComment(owner: string, repo: string, id: number, body: string): Promise<Comment> {
+  return gh<Comment>(`/repos/${owner}/${repo}/issues/comments/${id}`, { method: "PATCH", json: { body } });
+}
+
+export async function deleteComment(owner: string, repo: string, id: number): Promise<void> {
+  await gh(`/repos/${owner}/${repo}/issues/comments/${id}`, { method: "DELETE" });
 }
 
 export async function listAssignable(owner: string, repo: string): Promise<Person[]> {

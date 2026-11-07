@@ -3,12 +3,13 @@
 // 打開後直接是已登入狀態，示範專案在「demo/website」。
 import { createServer } from "node:http";
 import { readFile, stat } from "node:fs/promises";
-import { extname, join, normalize } from "node:path";
+import { extname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { FakeGitHub } from "./fake-github.mjs";
 
 const PORT = Number(process.env.PORT ?? 4173);
-const DIST = fileURLToPath(new URL("../web/dist/", import.meta.url));
+// DIST 可以指定別的建置資料夾（QA 在測的同時，開發者用另一份建置跑測試）
+const DIST = process.env.DIST ? resolve(process.env.DIST) + "/" : fileURLToPath(new URL("../web/dist/", import.meta.url));
 const TYPES = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript",

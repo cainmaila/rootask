@@ -134,7 +134,15 @@ export class FakeGitHub {
       id: this.nextComment++,
       body: "初稿已上傳，請大家看看 👀\n![初稿](https://github.com/demo/website/blob/taskapp-assets/attachments/3/ref.png)",
       created_at: iso(Date.now() - 2 * DAY),
+      updated_at: iso(Date.now() - 2 * DAY),
       user: { login: "amy", avatar_url: avatar("amy") },
+    });
+    c.comments.push({
+      id: this.nextComment++,
+      body: "收到，我週五前回覆。",
+      created_at: iso(Date.now() - DAY),
+      updated_at: iso(Date.now() - DAY),
+      user: { login: "cain", avatar_url: avatar("cain") },
     });
   }
 
@@ -453,6 +461,7 @@ export class FakeGitHub {
           id: this.nextComment++,
           body: req.body.body,
           created_at: iso(Date.now()),
+          updated_at: iso(Date.now()),
           user: { login: this.me.login, avatar_url: avatar(this.me.login) },
         };
         issue.comments.push(c);
@@ -520,12 +529,16 @@ export class FakeGitHub {
       const mine = c.user.login === this.me.login || this.me.role === "admin" || this.me.role === "maintain";
       if (req.method === "PATCH") {
         if (!mine) return { status: 403, json: { message: "只能編輯自己的留言" } };
+        if (!String(req.body?.body ?? "").trim()) return { status: 422, json: { message: "留言不能是空的" } };
         c.body = req.body.body;
+        c.updated_at = iso(Date.now());
+        this.#touch(r, i);
         return { status: 200, json: c };
       }
       if (req.method === "DELETE") {
         if (!mine) return { status: 403, json: { message: "只能刪除自己的留言" } };
         i.comments.splice(idx, 1);
+        this.#touch(r, i);
         return { status: 204 };
       }
       return { status: 200, json: c };

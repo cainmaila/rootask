@@ -351,3 +351,11 @@ section.tree { min-width: 0; }
   .sync-row { align-items: flex-start; justify-content: flex-start; }
   .sync-error .sync-msg { max-width: none; overflow: visible; flex: 1; }
 }
+
+/* 留言編輯、刪除（#50） */
+.comment-actions { margin-left: auto; display: inline-flex; gap: 10px; }
+.link-btn.danger, .btn.danger { color: var(--danger); }
+.btn.danger { border-color: var(--danger); }
+.comment-confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 4px 0 6px; padding: 8px 10px;
+  border: 1px solid var(--danger); border-radius: 10px; }
+.comment-edit { margin-top: 4px; }

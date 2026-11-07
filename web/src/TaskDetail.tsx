@@ -5,11 +5,14 @@ import type { Mutation, ProjectCtx } from "./ProjectView";
 import { patchTask, reparent, withStatus } from "./optimistic";
 import { AttachTextarea } from "./AttachTextarea";
 import { Markdown } from "./Markdown";
+import { CommentItem } from "./CommentItem";
 import { dismissSyncError, track, useSync } from "./sync";
 import {
   abilitiesOf,
   actualTimes,
   addComment,
+  deleteComment,
+  editComment,
   depthOf,
   listComments,
   moveBlockReason,
@@ -450,22 +453,71 @@ export function TaskDetail({ n, ctx, close, full = false, expand, open }: Props)
     </>
   );
 
+  // ---------- 留言（#50） ----------
+  const isManager = ctx.permission === "admin" || ctx.permission === "maintain";
+
+  /**
+   * 編輯／刪除留言：畫面先變；失敗時馬上把那則換回原樣，再向 GitHub 重讀確認；重試＝從頭再做
+   */
+  async function commentOp(
+    label: string,
+    id: number,
+    apply: (cs: Comment[]) => Comment[],
+    write: () => Promise<unknown>,
+  ): Promise<boolean> {
+    const at = comments?.findIndex((x) => x.id === id) ?? -1;
+    const old = at >= 0 ? comments![at] : undefined;
+    const revert = (cs: Comment[]) => {
+      const rest = cs.filter((x) => x.id !== id);
+      if (old) rest.splice(Math.min(at, rest.length), 0, old);
+      return rest;
+    };
+    const attempt = async (): Promise<boolean> => {
+      setComments((cs) => cs && apply(cs));
+      try {
+        await track(label, write, [n], { retry: () => void attempt() });
+        return true;
+      } catch {
+        setComments((cs) => cs && revert(cs));
+        listComments(owner, repo, n).then(setComments, () => {});
+        return false;
+      }
+    };
+    return attempt();
+  }
+
   const commentSection = (
     <>
       <h3>留言</h3>
       {!comments && <p className="muted small">載入中…</p>}
       <ul className="comments">
         {comments?.map((c) => (
-          <li key={c.id}>
-            <div className="comment-head">
-              {c.user && <img className="avatar" src={c.user.avatar_url} alt="" />}
-              <b>{c.user?.login ?? "已刪除的使用者"}</b>
-              <span className="muted small">{new Date(c.created_at).toLocaleString("zh-TW")}</span>
-            </div>
-            <div className="comment-body">
-              <Markdown text={c.body} />
-            </div>
-          </li>
+          <CommentItem
+            key={c.id}
+            c={c}
+            owner={owner}
+            repo={repo}
+            issue={n}
+            thresholdMb={threshold}
+            canManage={c.user?.login === ctx.me || isManager}
+            onError={setErr}
+            onEdit={(body) =>
+              commentOp(
+                "編輯留言",
+                c.id,
+                (cs) => cs.map((x) => (x.id === c.id ? { ...x, body, updated_at: new Date().toISOString() } : x)),
+                () => editComment(owner, repo, c.id, body),
+              )
+            }
+            onDelete={() =>
+              commentOp(
+                "刪除留言",
+                c.id,
+                (cs) => cs.filter((x) => x.id !== c.id),
+                () => deleteComment(owner, repo, c.id),
+              )
+            }
+          />
         ))}
       </ul>
       <form
