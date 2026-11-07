@@ -16,12 +16,22 @@ function observeTopbar(el: HTMLElement | null) {
   topbarObserver.observe(el);
 }
 
-type Route = { name: "projects" } | { name: "project"; owner: string; repo: string; task: number | null };
+export type ProjectViewName = "tree" | "board";
+type Route =
+  | { name: "projects" }
+  | { name: "project"; owner: string; repo: string; view: ProjectViewName; task: number | null };
 
+// #/p/<owner>/<repo>[/board][/t/<n>]：看板（#82）也有自己的網址，整頁任務從看板打開時回得去
 function parseRoute(): Route {
-  const m = location.hash.match(/^#\/p\/([^/]+)\/([^/]+)(?:\/t\/(\d+))?/);
+  const m = location.hash.match(/^#\/p\/([^/]+)\/([^/]+)(\/board)?(?:\/t\/(\d+))?/);
   return m
-    ? { name: "project", owner: decodeURIComponent(m[1]), repo: decodeURIComponent(m[2]), task: m[3] ? Number(m[3]) : null }
+    ? {
+        name: "project",
+        owner: decodeURIComponent(m[1]),
+        repo: decodeURIComponent(m[2]),
+        view: m[3] ? "board" : "tree",
+        task: m[4] ? Number(m[4]) : null,
+      }
     : { name: "projects" };
 }
 
@@ -104,7 +114,13 @@ export function App() {
       {route.name === "projects" ? (
         <ProjectList installUrl={session.installUrl} />
       ) : (
-        <ProjectView key={`${route.owner}/${route.repo}`} owner={route.owner} repo={route.repo} fullTask={route.task} />
+        <ProjectView
+          key={`${route.owner}/${route.repo}`}
+          owner={route.owner}
+          repo={route.repo}
+          view={route.view}
+          fullTask={route.task}
+        />
       )}
     </div>
   );

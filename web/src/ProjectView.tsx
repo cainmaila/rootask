@@ -7,6 +7,9 @@ import { isClosing } from "./config";
 import { todayLocal } from "../../shared/meta";
 import { TaskDetail } from "./TaskDetail";
 import { TaskNode, type DragCtx, type TreeView } from "./TaskNode";
+import { Board } from "./Board";
+import { boardColumns, treeOrder } from "../../shared/board";
+import type { ProjectViewName } from "./App";
 import { gh } from "./api";
 import { track } from "./sync";
 import { useTreeDrag, type DropPosition } from "./useTreeDrag";
@@ -101,16 +104,30 @@ function pollInterval(): number {
   return 30_000;
 }
 
-const projectHash = (owner: string, repo: string) => `#/p/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
-const taskHash = (owner: string, repo: string, n: number) => `${projectHash(owner, repo)}/t/${n}`;
+const projectHash = (owner: string, repo: string, view: ProjectViewName = "tree") =>
+  `#/p/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}${view === "board" ? "/board" : ""}`;
+const taskHash = (owner: string, repo: string, n: number, view: ProjectViewName = "tree") =>
+  `${projectHash(owner, repo, view)}/t/${n}`;
+
+// 看板「只看最底層任務」是每位使用者自己的偏好（#82）
+const leavesKey = (owner: string, repo: string) => `rootask:board-leaves:${owner}/${repo}`;
+function readLeaves(owner: string, repo: string): boolean {
+  try {
+    return localStorage.getItem(leavesKey(owner, repo)) === "1";
+  } catch {
+    return false;
+  }
+}
 
 export function ProjectView({
   owner,
   repo,
+  view: viewName = "tree",
   fullTask = null,
 }: {
   owner: string;
   repo: string;
+  view?: ProjectViewName;
   fullTask?: number | null;
 }) {
   type Loaded = Omit<ProjectCtx, "reload" | "mutate" | "refresh" | "reorder">;
@@ -124,6 +141,7 @@ export function ProjectView({
   const [newTitle, setNewTitle] = useState("");
   const [busy, setBusy] = useState(false);
   const [showDone, setShowDone] = useState(() => readShowDone(owner, repo));
+  const [leavesOnly, setLeavesOnly] = useState(() => readLeaves(owner, repo));
   const [loadingDone, setLoadingDone] = useState(false);
   const [filter, setFilter] = useState<TaskFilter>(EMPTY_FILTER);
   // 篩選時會自動展開符合任務的上層；使用者在篩選中手動展開／收合的記在這裡，換條件就重來
@@ -371,7 +389,7 @@ export function ProjectView({
       return (
         <main className="page">
           <p className="muted">找不到任務 #{fullTask}，可能已被刪除或你沒有權限。</p>
-          <a href={projectHash(owner, repo)}>回到任務列表</a>
+          <a href={projectHash(owner, repo, viewName)}>回到任務列表</a>
         </main>
       );
     }
@@ -384,9 +402,9 @@ export function ProjectView({
           full
           close={() => {
             setSelected(fullTask);
-            location.hash = projectHash(owner, repo);
+            location.hash = projectHash(owner, repo, viewName);
           }}
-          open={(n) => (location.hash = taskHash(owner, repo, n))}
+          open={(n) => (location.hash = taskHash(owner, repo, n, viewName))}
         />
       </main>
     );
@@ -443,6 +461,29 @@ export function ProjectView({
     });
   };
 
+  /** 看板的欄位（#82）：照任務樹順序，篩選時只放符合的 */
+  function boardColumnsNow() {
+    const tree = ctx!.tree;
+    const cfg = ctx!.cfg.config;
+    const items = new Map(
+      [...tree.byNumber.values()].map((t) => [
+        t.number,
+        {
+          number: t.number,
+          statusId: statusOf(t, cfg).id,
+          hasChildren: t.childTotal > 0 || (tree.children.get(t.number)?.length ?? 0) > 0,
+        },
+      ]),
+    );
+    return boardColumns(
+      cfg.statuses.map((x) => x.id),
+      treeOrder(tree.children),
+      items,
+      { leavesOnly, only: result ? result.matches : null },
+    );
+  }
+  const boardCols = boardColumnsNow;
+
   async function addRoot() {
     const title = newTitle.trim();
     if (!title) return;
@@ -479,9 +520,19 @@ export function ProjectView({
   return (
     <main className="page wide">
       <nav className="tabs">
-        <button className={tab === "tasks" ? "on" : ""} onClick={() => setTab("tasks")}>
-          任務
-        </button>
+        {(["tree", "board"] as const).map((v) => (
+          <button
+            key={v}
+            className={tab === "tasks" && viewName === v ? "on" : ""}
+            aria-current={tab === "tasks" && viewName === v ? "page" : undefined}
+            onClick={() => {
+              setTab("tasks");
+              location.hash = projectHash(owner, repo, v);
+            }}
+          >
+            {v === "tree" ? "任務樹" : "看板"}
+          </button>
+        ))}
         <button className={tab === "settings" ? "on" : ""} onClick={() => setTab("settings")}>
           設定
         </button>
@@ -504,7 +555,7 @@ export function ProjectView({
         <Settings ctx={full} canAdmin={canAdmin} />
       ) : (
         <div className={`split ${selected !== null ? "has-detail" : ""}`}>
-          <section className="tree">
+          <section className={viewName === "board" ? "board-area" : "tree"}>
             {!can.triage && (
               <p className="banner small" role="note">
                 你在這個專案只有讀取權限：可以瀏覽與留言，不能新增、修改或調整順序。
@@ -545,6 +596,37 @@ export function ProjectView({
               loadingDone={loadingDone}
               onToggleDone={() => void toggleShowDone()}
             />
+{viewName === "board" ? (
+              <>
+                <div className="board-tools">
+                  <label className={`check small chip ${leavesOnly ? "on" : ""}`}>
+                    <input
+                      type="checkbox"
+                      checked={leavesOnly}
+                      onChange={(e) => {
+                        setLeavesOnly(e.target.checked);
+                        try {
+                          localStorage.setItem(leavesKey(owner, repo), e.target.checked ? "1" : "0");
+                        } catch {
+                          /* 存不了不影響使用 */
+                        }
+                      }}
+                    />
+                    只看最底層任務
+                  </label>
+                  {filtering && result && result.matches.size === 0 && (
+                    <span className="muted small">
+                      沒有符合的任務。
+                      <button className="link-btn" onClick={() => setFilter(EMPTY_FILTER)}>
+                        清除篩選
+                      </button>
+                    </span>
+                  )}
+                </div>
+                <Board ctx={full} columns={boardCols()} selected={selected} select={setSelected} />
+              </>
+            ) : (
+              <>
             {filtering && roots.length === 0 && (
               <div className="muted empty">
                 <p>沒有符合的任務。</p>
@@ -591,6 +673,8 @@ export function ProjectView({
               ))}
               {treeDrag.over?.end && <li className="drop-end" aria-hidden />}
             </ul>
+              </>
+            )}
           </section>
           {selected !== null && ctx.tree.byNumber.has(selected) && (
             <TaskDetail
@@ -598,7 +682,7 @@ export function ProjectView({
               n={selected}
               ctx={full}
               close={() => setSelected(null)}
-              expand={() => (location.hash = taskHash(owner, repo, selected))}
+              expand={() => (location.hash = taskHash(owner, repo, selected, viewName))}
             />
           )}
         </div>
