@@ -40,7 +40,7 @@ test.describe("多人同步", () => {
     expect(polls.filter((r) => r.includes("/events")).length).toBeGreaterThanOrEqual(2);
     expect(polls.filter((r) => !r.includes("/events")).length).toBeGreaterThanOrEqual(2);
     expect(polls.every((r) => r.endsWith("→ 304")), polls.join("\n")).toBe(true);
-    expect(reqs.filter((r) => r === "POST /graphql")).toEqual([]);
+    expect(reqs.filter((r) => r.startsWith("POST /graphql"))).toEqual([]);
   });
 
   test("有變動時只重新讀取變了的任務", async ({ page }) => {
@@ -52,7 +52,8 @@ test.describe("多人同步", () => {
     const reqs = (await (await page.request.get("/__requests")).json()) as string[];
     // 整棵樹的查詢、設定、成員、權限都沒有重讀
     expect(reqs.filter((r) => /contents|assignees|^GET \/user$|^GET \/repos\/demo\/website$/.test(r))).toEqual([]);
-    expect(reqs.filter((r) => r === "POST /graphql").length).toBe(1);
+    // 只讀變了的那一張（#75：假 GitHub 的列表有 updated_at 才驗得到）
+    expect(reqs.filter((r) => r.startsWith("POST /graphql"))).toEqual(["POST /graphql #13"]);
   });
 
   test("別人把任務移到別的父任務底下（GitHub 只留事件、不改更新時間）", async ({ page }) => {
@@ -107,5 +108,85 @@ test.describe("多人同步", () => {
     await expect(row(page, "整理專案文件").locator(".pill")).toHaveText("完成", { timeout: 5000 });
     await page.reload();
     await expect.poll(() => rows(page)).not.toContain("整理專案文件");
+  });
+
+  // ---------- QA 回報（#72～#76） ----------
+
+  const serverIssue = async (page: Page, n: number) => {
+    const st = await (await page.request.get("/__state")).json();
+    return (st.repos["demo/website"].issues as { number: number; title: string; body: string; labels: string[]; assignees: string[]; state: string }[]).find(
+      (i) => i.number === n,
+    )!;
+  };
+
+  test("#72 點了標題欄沒改字就離開，不會把同事剛改的標題蓋回去", async ({ page }) => {
+    await openProject(page);
+    await row(page, "整理專案文件").locator(".node-title").click();
+    const title = page.locator("aside.detail .title-input");
+    await title.click();
+    await other(page).patch(13, { title: "同事改的標題" });
+    await expect(row(page, "同事改的標題")).toBeVisible({ timeout: 5000 });
+    await title.blur();
+    await expect(title).toHaveValue("同事改的標題");
+    await page.waitForTimeout(800);
+    expect((await serverIssue(page, 13)).title).toBe("同事改的標題");
+  });
+
+  test("#72 打開說明編輯沒改就儲存，不會把同事剛改的說明蓋回去", async ({ page }) => {
+    await openProject(page);
+    await row(page, "整理專案文件").locator(".node-title").click();
+    const panel = page.locator("aside.detail");
+    await panel.getByRole("button", { name: /加上說明/ }).click();
+    await other(page).patch(13, { body: "同事寫的說明" });
+    await page.waitForTimeout(1200); // 等下一次檢查
+    await panel.getByRole("button", { name: "儲存" }).click();
+    await expect(panel.locator(".description")).toContainText("同事寫的說明");
+    await page.waitForTimeout(800);
+    expect((await serverIssue(page, 13)).body).toBe("同事寫的說明");
+  });
+
+  test("#73 同事剛加的分配人與標籤，改分配人、改狀態時不會被拿掉", async ({ page }) => {
+    // 這個情境要在 App 還沒偵測到之前操作：把檢查間隔調很長
+    await page.addInitScript(() => localStorage.setItem("rootask:poll-ms", "600000"));
+    await openProject(page);
+    await page.request.post("/api/gh/repos/demo/website/issues/13/assignees", { data: { assignees: ["amy"] } });
+    await other(page).patch(13, { labels: ["status:todo", "bug"] });
+    await row(page, "整理專案文件").locator(".node-title").click();
+    const panel = page.locator("aside.detail");
+    await panel.getByRole("button", { name: "ben" }).click();
+    await expect(page.getByText("✓ 已同步")).toBeVisible();
+    await panel.getByLabel("狀態", { exact: true }).selectOption("doing");
+    await expect(page.getByText("✓ 已同步")).toBeVisible();
+    const i = await serverIssue(page, 13);
+    expect(i.assignees.sort()).toEqual(["amy", "ben"]);
+    expect(i.labels.sort()).toEqual(["bug", "status:doing"]);
+    // 讀回來之後畫面上也看得到同事加的 amy
+    await expect(row(page, "整理專案文件").locator('img[alt="amy"]')).toBeVisible();
+  });
+
+  test("#74 同事重開沒載入的已完成任務，「顯示已完成」的數字跟著變", async ({ page }) => {
+    await openProject(page);
+    const label = page.getByText(/顯示已完成（\d+）/);
+    const before = Number((await label.innerText()).match(/（(\d+)）/)![1]);
+    const st = await (await page.request.get("/__state")).json();
+    const closed = (st.repos["demo/website"].issues as { number: number; title: string }[]).find((i) => i.title === "字體與色票")!;
+    await other(page).patch(closed.number, { labels: ["status:todo"], state: "open", state_reason: "reopened" });
+    await expect(label).toHaveText(`顯示已完成（${before - 1}）`, { timeout: 5000 });
+  });
+
+  test("#76 標題按 Enter 存、按 Esc 取消", async ({ page }) => {
+    await openProject(page);
+    await row(page, "整理專案文件").locator(".node-title").click();
+    const title = page.locator("aside.detail .title-input");
+    await title.fill("按 Enter 存的標題");
+    await title.press("Enter");
+    await expect(title).not.toBeFocused();
+    await expect(row(page, "按 Enter 存的標題")).toBeVisible();
+    await expect.poll(async () => (await serverIssue(page, 13)).title).toBe("按 Enter 存的標題");
+    await title.fill("不要的標題");
+    await title.press("Escape");
+    await expect(title).toHaveValue("按 Enter 存的標題");
+    await page.waitForTimeout(500);
+    expect((await serverIssue(page, 13)).title).toBe("按 Enter 存的標題");
   });
 });

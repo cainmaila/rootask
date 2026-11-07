@@ -109,15 +109,20 @@ function toTask(n: IssueNode): Task {
   };
 }
 
-/** 依編號一次抓多張 issue（用別名組成單一查詢） */
-async function loadByNumbers(owner: string, repo: string, numbers: number[]): Promise<Task[]> {
-  if (numbers.length === 0) return [];
+/** 依編號一次抓多張 issue（用別名組成單一查詢），順便取 repo 已關閉的總數 */
+async function loadByNumbers(owner: string, repo: string, numbers: number[]): Promise<{ tasks: Task[]; closedCount: number }> {
+  if (numbers.length === 0) return { tasks: [], closedCount: -1 };
   const fields = numbers.map((n) => `i${n}: issue(number: ${n}) { ...T }`).join("\n");
-  const q = `query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { ${fields} } }\n${ISSUE_FIELDS}`;
-  const r = await graphql<{ repository: Record<string, IssueNode | null> }>(q, { owner, name: repo });
-  return Object.values(r.repository)
-    .filter((n): n is IssueNode => !!n)
-    .map(toTask);
+  const q = `query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { ${fields}
+    closed: issues(states: CLOSED) { totalCount } } }\n${ISSUE_FIELDS}`;
+  const r = await graphql<{ repository: Record<string, IssueNode | { totalCount: number } | null> }>(q, { owner, name: repo });
+  const { closed, ...issues } = r.repository;
+  return {
+    tasks: Object.values(issues)
+      .filter((n): n is IssueNode => !!n)
+      .map(toTask),
+    closedCount: (closed as { totalCount: number } | null)?.totalCount ?? -1,
+  };
 }
 
 /**
@@ -128,19 +133,23 @@ export async function fetchTasks(
   repo: string,
   numbers: number[],
   has: (n: number) => boolean,
-): Promise<Task[]> {
+): Promise<{ tasks: Task[]; closedCount: number }> {
   const out: Task[] = [];
+  let closedCount = -1;
   const seen = new Set<number>();
   let want = [...new Set(numbers)];
   for (let round = 0; round <= MAX_DEPTH + 1 && want.length > 0; round++) {
     want.forEach((n) => seen.add(n));
-    const got = await loadByNumbers(owner, repo, want);
+    const r = await loadByNumbers(owner, repo, want);
+    const got = r.tasks;
+    if (r.closedCount >= 0) closedCount = r.closedCount;
     out.push(...got);
     want = [
       ...new Set(got.map((t) => t.parent).filter((p): p is number => p !== null && !has(p) && !seen.has(p))),
     ];
   }
-  return out;
+  // 已關閉總數直接讀 GitHub 的：別人重開沒載入的已完成任務時，數字才對（#74）
+  return { tasks: out, closedCount };
 }
 
 export interface LoadOptions {
@@ -180,7 +189,7 @@ export async function loadTree(owner: string, repo: string, opts: LoadOptions = 
     const pins = round === 0 ? (opts.pin ?? []).filter((n) => !have.has(n)) : [];
     const want = [...new Set([...pins, ...missingParents])];
     if (want.length === 0) break;
-    const more = await loadByNumbers(owner, repo, want);
+    const more = (await loadByNumbers(owner, repo, want)).tasks;
     for (const t of more) have.add(t.number);
     for (const n of want) have.add(n); // 抓不到的（例如已刪除）也不再重試
     tasks.push(...more);
@@ -354,13 +363,28 @@ export async function moveTask(owner: string, repo: string, task: Task, newParen
   });
 }
 
+/**
+ * 改狀態：標籤與開關一次 PATCH 寫完（#32）。標籤以 GitHub 上最新的為準，只換掉狀態標籤，
+ * 不會把別人剛加的其他標籤（例如 bug）蓋掉（#73）。
+ */
 export async function setStatus(owner: string, repo: string, task: Task, status: StatusDef): Promise<void> {
-  const labels = [...task.labels.filter((l) => !l.startsWith(STATUS_PREFIX)), STATUS_PREFIX + status.id];
+  const cur = await gh<{ labels: { name: string }[]; state: "open" | "closed" }>(
+    `/repos/${owner}/${repo}/issues/${task.number}`,
+  );
+  const labels = [...cur.labels.map((l) => l.name).filter((l) => !l.startsWith(STATUS_PREFIX)), STATUS_PREFIX + status.id];
   const closed = status.category === "done" || status.category === "cancelled";
   const json: Record<string, unknown> = { labels, state: closed ? "closed" : "open" };
   if (closed) json.state_reason = status.category === "done" ? "completed" : "not_planned";
-  else if (task.state === "CLOSED") json.state_reason = "reopened";
+  else if (cur.state === "closed") json.state_reason = "reopened";
   await gh(`/repos/${owner}/${repo}/issues/${task.number}`, { method: "PATCH", json });
+}
+
+/** 加／移除一位分配人：只送有變的那一位，不會把別人剛加的分配人蓋掉（#73） */
+export async function setAssignee(owner: string, repo: string, n: number, login: string, on: boolean): Promise<void> {
+  await gh(`/repos/${owner}/${repo}/issues/${n}/assignees`, {
+    method: on ? "POST" : "DELETE",
+    json: { assignees: [login] },
+  });
 }
 
 export async function updateTask(

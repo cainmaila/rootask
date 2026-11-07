@@ -61,7 +61,8 @@ test.describe("樂觀更新", () => {
     await expect(panel.locator(".title-input")).toHaveValue("整理專案文件");
     await expect(row(page, "整理專案文件")).toBeVisible();
 
-    await page.request.post("/__fail?times=1&method=PATCH&path=/issues/13");
+    // 分配人改成只送有變的那一位（#73：POST／DELETE /assignees）
+    await page.request.post("/__fail?times=1&method=POST&path=/issues/13/assignees");
     await panel.getByRole("button", { name: "amy" }).click();
     await expect(page.getByRole("alert")).toContainText("更新分配人（#13）失敗");
     await expect(panel.getByRole("button", { name: "amy" })).not.toHaveClass(/\bon\b/);
@@ -74,9 +75,13 @@ test.describe("樂觀更新", () => {
     await page.locator("aside.detail").getByLabel("狀態", { exact: true }).selectOption("doing");
     await expect(page.getByText("✓ 已同步")).toBeVisible();
     const reqs = (await (await page.request.get("/__requests")).json()) as string[];
-    // 打開面板時讀留言與事件紀錄；之後是 1 個寫入＋1 個 GraphQL 查詢
+    // 打開面板時讀留言與事件紀錄；之後是讀最新標籤（#73）＋1 個寫入＋只讀這張的 GraphQL
     const after = reqs.filter((r) => !/\/comments|\/events/.test(r));
-    expect(after).toEqual(["PATCH /repos/demo/website/issues/13", "POST /graphql"]);
+    expect(after).toEqual([
+      "GET /repos/demo/website/issues/13",
+      "PATCH /repos/demo/website/issues/13",
+      "POST /graphql #13",
+    ]);
   });
 
   test("新增任務只讀取新任務，不重讀整棵樹", async ({ page }) => {
@@ -86,7 +91,9 @@ test.describe("樂觀更新", () => {
     await page.getByRole("button", { name: "新增", exact: true }).click();
     await expect.poll(() => rows(page)).toContain("新的任務");
     const reqs = (await (await page.request.get("/__requests")).json()) as string[];
-    expect(reqs).toEqual(["POST /repos/demo/website/issues", "POST /graphql"]);
+    expect(reqs).toHaveLength(2);
+    expect(reqs[0]).toBe("POST /repos/demo/website/issues");
+    expect(reqs[1]).toMatch(/^POST \/graphql #\d+$/);
   });
 
   test("換父任務：立刻搬過去", async ({ page }) => {
@@ -233,7 +240,7 @@ test.describe("樂觀更新：QA 回報（第二輪）", () => {
 
   test("#71 桌面頁面往下捲、有多則錯誤時，任務詳情的關閉鈕不被蓋住", async ({ page }) => {
     await page.setViewportSize({ width: 1200, height: 420 });
-    await page.request.post("/__fail?times=3&method=PATCH");
+    await page.request.post("/__fail?times=3"); // 改狀態、標題（PATCH）＋分配人（POST）
     await openProject(page);
     await row(page, "整理專案文件").locator(".node-title").click();
     const panel = page.locator("aside.detail");

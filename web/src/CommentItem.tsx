@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AttachTextarea } from "./AttachTextarea";
 import { Markdown } from "./Markdown";
 import type { Comment } from "./tasks";
@@ -26,6 +26,8 @@ export function CommentItem({ c, owner, repo, issue, thresholdMb, canManage, onE
   const [confirming, setConfirming] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [failed, setFailed] = useState(false);
+  // 開始編輯時的內容：沒改就不寫回，免得把別人剛改的蓋掉（#72）
+  const base = useRef(c.body);
   const edited = !!c.updated_at && c.updated_at !== c.created_at;
 
   // 沒存到後按頂端列的「重試」存好了：關掉編輯框
@@ -38,7 +40,7 @@ export function CommentItem({ c, owner, repo, issue, thresholdMb, canManage, onE
 
   async function save() {
     const text = draft.trim();
-    if (!text || text === c.body) {
+    if (!text || text === base.current.trim() || text === c.body) {
       setEditing(false);
       return;
     }
@@ -66,6 +68,7 @@ export function CommentItem({ c, owner, repo, issue, thresholdMb, canManage, onE
             <button
               className="link-btn small"
               onClick={() => {
+                base.current = c.body;
                 setDraft(c.body);
                 setEditing(true);
               }}

@@ -18,6 +18,7 @@ import {
   moveBlockReason,
   moveTask,
   neighbor,
+  setAssignee,
   setStatus,
   statusOf,
   updateBody,
@@ -90,6 +91,8 @@ export function TaskDetail({ n, ctx, close, full = false, expand, open }: Props)
   // 失敗還原、或別人改了標題與日期時，欄位跟著更新（#48）
   // 正在打標題時不蓋掉（#49：別人同時改了標題）
   const titleRef = useRef<HTMLInputElement>(null);
+  const titleBase = useRef(task.title);
+  const titleCancel = useRef(false);
   useEffect(() => {
     if (document.activeElement !== titleRef.current) setTitle(task.title);
   }, [task.title]);
@@ -161,10 +164,21 @@ export function TaskDetail({ n, ctx, close, full = false, expand, open }: Props)
     }
   }
 
+  // 開始編輯時的說明：存檔時只有「真的改過」才寫回，沒改就不會把別人剛改的蓋回舊值（#72）
+  const bodyBase = useRef(task.body ?? "");
+  function startEditBody() {
+    bodyBase.current = task.body ?? "";
+    setBody(task.body ?? "");
+    setEditingBody(true);
+  }
+
   async function saveBody() {
     setEditingBody(false);
     const text = body;
-    if (text === (task.body ?? "")) return;
+    if (text === bodyBase.current || text === (task.body ?? "")) {
+      setBody(task.body ?? "");
+      return;
+    }
     const ok = await run("更新說明", {
       optimistic: (t) => patchTask(t, n, { body: text }),
       write: () => updateBody(owner, repo, n, { text }),
@@ -182,14 +196,17 @@ export function TaskDetail({ n, ctx, close, full = false, expand, open }: Props)
 
   const assigned = new Set(task.assignees.map((a) => a.login));
   function toggleAssignee(login: string) {
-    const next = new Set(assigned);
-    if (next.has(login)) next.delete(login);
-    else if (next.size < MAX_ASSIGNEES) next.add(login);
-    const known = new Map([...ctx.people, ...task.assignees].map((p) => [p.login, p]));
+    const on = !assigned.has(login);
+    if (on && assigned.size >= MAX_ASSIGNEES) return;
+    const person = [...ctx.people, ...task.assignees].find((p) => p.login === login) ?? { login, avatarUrl: "" };
     void run("更新分配人", {
-      optimistic: (t) =>
-        patchTask(t, n, { assignees: [...next].map((login) => known.get(login) ?? { login, avatarUrl: "" }) }),
-      write: () => updateTask(owner, repo, n, { assignees: [...next] }),
+      // 樂觀更新也只動這一位：同步中收到別人加的分配人，畫面上照樣保留
+      optimistic: (t) => {
+        const cur = t.byNumber.get(n)?.assignees ?? [];
+        const rest = cur.filter((a) => a.login !== login);
+        return patchTask(t, n, { assignees: on ? [...rest, person] : rest });
+      },
+      write: () => setAssignee(owner, repo, n, login, on),
     });
   }
 
@@ -233,17 +250,33 @@ export function TaskDetail({ n, ctx, close, full = false, expand, open }: Props)
     <input
       ref={titleRef}
       className="title-input"
+      aria-label="標題"
       readOnly={!canWrite}
       value={title}
+      onFocus={() => (titleBase.current = task.title)}
       onChange={(e) => setTitle(e.target.value)}
-      onBlur={() =>
-        title.trim() &&
-        title !== task.title &&
-        run("更新標題", {
-          optimistic: (t) => patchTask(t, n, { title: title.trim() }),
-          write: () => updateTask(owner, repo, n, { title: title.trim() }),
-        })
-      }
+      onKeyDown={(e) => {
+        // Enter 存、Esc 取消（#76）
+        if (e.key === "Enter") e.currentTarget.blur();
+        if (e.key === "Escape") {
+          titleCancel.current = true;
+          setTitle(task.title);
+          e.currentTarget.blur();
+        }
+      }}
+      onBlur={() => {
+        const t = title.trim();
+        // 取消、清空、或沒有改（只是點了一下）：換回最新的標題，不寫回（#72）
+        if (titleCancel.current || !t || t === titleBase.current.trim() || t === task.title) {
+          titleCancel.current = false;
+          setTitle(task.title);
+          return;
+        }
+        void run("更新標題", {
+          optimistic: (tr) => patchTask(tr, n, { title: t }),
+          write: () => updateTask(owner, repo, n, { title: t }),
+        });
+      }}
     />
   );
 
@@ -252,7 +285,7 @@ export function TaskDetail({ n, ctx, close, full = false, expand, open }: Props)
       <span className="field-head">
         說明
         {canWrite && !editingBody && (
-          <button className="link-btn small" onClick={() => setEditingBody(true)}>
+          <button className="link-btn small" onClick={startEditBody}>
             編輯
           </button>
         )}
@@ -293,11 +326,11 @@ export function TaskDetail({ n, ctx, close, full = false, expand, open }: Props)
           }
         />
       ) : body.trim() ? (
-        <div className="description" onDoubleClick={() => canWrite && setEditingBody(true)}>
+        <div className="description" onDoubleClick={() => canWrite && startEditBody()}>
           <Markdown text={body} />
         </div>
       ) : canWrite ? (
-        <button className="description empty" onClick={() => setEditingBody(true)}>
+        <button className="description empty" onClick={startEditBody}>
           加上說明或圖片…
         </button>
       ) : (

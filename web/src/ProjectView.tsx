@@ -184,8 +184,11 @@ export function ProjectView({
     async (numbers: number[], done?: number) => {
       const cur = base.current;
       if (!cur) return;
-      const got = numbers.length ? await fetchTasks(owner, repo, numbers, (n) => cur.byNumber.has(n)) : [];
-      base.current = replaceTasks(base.current!, got);
+      const got = numbers.length
+        ? await fetchTasks(owner, repo, numbers, (n) => cur.byNumber.has(n))
+        : { tasks: [], closedCount: -1 };
+      const next = replaceTasks(base.current!, got.tasks);
+      base.current = got.closedCount >= 0 ? { ...next, closedCount: got.closedCount } : next;
       if (done !== undefined) pending.current.delete(done);
       render();
     },

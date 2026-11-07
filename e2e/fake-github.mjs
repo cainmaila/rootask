@@ -251,6 +251,9 @@ export class FakeGitHub {
       state_reason: i.state_reason,
       labels: i.labels.map((name) => ({ name })),
       assignees: i.assignees.map((login) => ({ login, avatar_url: avatar(login) })),
+      created_at: i.created_at,
+      updated_at: i.updated_at,
+      closed_at: i.closed_at,
     };
   }
 
@@ -469,6 +472,16 @@ export class FakeGitHub {
         return { status: 201, json: c };
       }
     }
+    if (sub === "/assignees" && (method === "POST" || method === "DELETE")) {
+      // 加／移除指定的分配人，其他人不動（#73）
+      if (!canTriage) return deny;
+      const who = req.body?.assignees ?? [];
+      const next = method === "POST" ? [...new Set([...issue.assignees, ...who])] : issue.assignees.filter((a) => !who.includes(a));
+      if (next.length > 10) return { status: 422, json: { message: "最多 10 位分配人" } };
+      issue.assignees = next;
+      this.#touch(r, issue);
+      return { status: method === "POST" ? 201 : 200, json: this.#rest(issue) };
+    }
     if (sub === "/events" || sub.startsWith("/events?")) return { status: 200, json: issue.events };
     if (sub === "/sub_issues") {
       if (method === "GET")
@@ -551,6 +564,7 @@ export class FakeGitHub {
     const r = this.repo(variables.owner, variables.name);
     if (!r) return { status: 200, json: { data: { repository: null }, errors: [{ message: "Could not resolve to a Repository" }] } };
     if (query.includes("issues(first: 100")) {
+      this.#noteQuery("全部");
       const states = variables.states;
       const all = [...r.issues.values()]
         .filter((i) => !states || states.includes(i.state.toUpperCase()))
@@ -571,11 +585,22 @@ export class FakeGitHub {
       };
     }
     const repository = {};
+    const nums = [];
     for (const mm of query.matchAll(/i(\d+): issue\(number: (\d+)\)/g)) {
       const i = r.issues.get(Number(mm[2]));
+      nums.push(`#${mm[2]}`);
       repository[`i${mm[1]}`] = i ? this.#node(r, i) : null;
     }
+    if (query.includes("closed: issues(states: CLOSED)"))
+      repository.closed = { totalCount: [...r.issues.values()].filter((i) => i.state === "closed").length };
+    this.#noteQuery(nums.join(","));
     return { status: 200, json: { data: { repository } } };
+  }
+
+  /** /__requests 裡的 GraphQL 標出讀了哪些任務（#75：檢查「只重讀變了的任務」） */
+  #noteQuery(what) {
+    const i = this.requests.lastIndexOf("POST /graphql");
+    if (i >= 0) this.requests[i] += ` ${what}`;
   }
 
   #upload(req) {
