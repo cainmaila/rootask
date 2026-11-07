@@ -310,7 +310,14 @@ export class FakeGitHub {
         status: 200,
         json: {
           default_branch: "main",
-          permissions: { admin: role === "admin", maintain: role === "admin" || role === "maintain", push: role !== "read" },
+          // 和真實 GitHub 一樣：triage 沒有 push
+          permissions: {
+            admin: role === "admin",
+            maintain: role === "admin" || role === "maintain",
+            push: ["admin", "maintain", "write"].includes(role),
+            triage: role !== "read",
+            pull: true,
+          },
         },
       };
     }

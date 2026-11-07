@@ -395,7 +395,7 @@ export function ProjectView({
             )}
             {!filtering && roots.length === 0 && (
               <p className="muted empty">
-                {!showDone && ctx.tree.closedCount > 0 ? "目前沒有未完成的任務 🎉" : "還沒有任務，從上面新增第一個吧。"}
+                {!showDone && ctx.tree.closedCount > 0 ? "目前沒有未完成的任務 🎉" : canWrite ? "還沒有任務，從上面新增第一個吧。" : "這個專案還沒有任務。"}
               </p>
             )}
             {filtering && !showDone && ctx.tree.closedCount > 0 && roots.length > 0 && (

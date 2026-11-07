@@ -329,11 +329,16 @@ section.tree { min-width: 0; }
     display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
   }
   .node-meta { flex-wrap: wrap; }
-  /* 同步失敗：改成頂端列下方的完整提示，不截斷、不擠壓頂端列（#62） */
+  /* 同步失敗：在頂端列裡換到第二行完整顯示，不截斷、不擠壓頂端列，也不蓋住下面的分頁（#62） */
+  .topbar { flex-wrap: wrap; row-gap: 8px; }
   .sync-error {
-    position: fixed; z-index: 60; left: 12px; right: 12px; top: calc(56px + env(safe-area-inset-top));
+    order: 10; flex: 1 1 100%;
     margin: 0; padding: 8px 10px; border-radius: 10px; white-space: normal; align-items: flex-start;
-    background: var(--surface); border: 1px solid var(--danger); box-shadow: 0 6px 20px rgb(0 0 0 / 0.18);
+    background: var(--surface); border: 1px solid var(--danger);
   }
+  /* 錯誤排到第二行時，「登出」仍靠右 */
+  .sync-error + .link { margin-left: auto; }
+  /* 錯誤要蓋在任務詳情的下拉面板上面 */
+  .topbar:has(.sync-error) { z-index: 20; }
   .sync-error .sync-msg { max-width: none; overflow: visible; flex: 1; }
 }

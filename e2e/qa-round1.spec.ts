@@ -146,5 +146,21 @@ test.describe("手機", () => {
     expect(await alert.locator(".sync-msg").evaluate((e) => e.scrollWidth <= e.clientWidth + 1)).toBe(true);
     const logout = (await page.getByRole("link", { name: "登出" }).boundingBox())!;
     expect(logout.height).toBeLessThan(30);
+    // 「登出」仍在最右邊（QA 複驗：出錯時會跳到 Rootask 旁邊）
+    expect(logout.x + logout.width).toBeGreaterThan(vw - 40);
+    // 任務詳情的關閉鈕沒被蓋住
+    await expect(page.locator("aside.detail").getByRole("button", { name: "關閉" })).toBeInViewport();
+    await page.locator("aside.detail").getByRole("button", { name: "關閉" }).tap();
+    // 錯誤還在時，下面的分頁仍可切換（QA 複驗：固定橫幅蓋住分頁）
+    await expect(alert).toBeVisible();
+    await page.locator("nav.tabs").getByRole("button", { name: "設定" }).tap();
+    await expect(page.getByRole("heading", { name: "狀態" })).toBeVisible();
+  });
+
+  test("#59 唯讀成員看到空專案時，不會叫他新增", async ({ page }) => {
+    await page.request.post("/__as?login=amy&role=read");
+    await page.goto("/#/p/demo/empty-project");
+    await expect(page.locator(".empty")).toContainText("這個專案還沒有任務");
+    await expect(page.locator(".empty")).not.toContainText("新增第一個");
   });
 });
