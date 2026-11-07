@@ -10,16 +10,19 @@ import { TaskNode, type DragCtx, type TreeView } from "./TaskNode";
 import { gh } from "./api";
 import { track } from "./sync";
 import { useTreeDrag, type DropPosition } from "./useTreeDrag";
+import { applyReorder, newlyClosed, reorderAffects, replaceTasks, restoreTasks } from "./optimistic";
 import {
   createTask,
+  fetchTasks,
   isDescendant,
   listAssignable,
   loadTree,
   moveBlockReason,
   myPermission,
   neighbor,
-  reorderTask,
+  planReorder,
   statusOf,
+  writeReorder,
   type TaskTree,
   type Person,
   type LoadedTree,
@@ -34,7 +37,24 @@ export interface ProjectCtx {
   permission: string;
   /** 目前登入者的 GitHub 帳號 */
   me: string;
+  /** 全部重新讀取（設定、任務、成員、權限） */
   reload: () => Promise<void>;
+  /** 寫回 GitHub：先在畫面上生效，成功後只重新讀取受影響的任務，失敗時還原（#48） */
+  mutate: (label: string, op: Mutation) => Promise<void>;
+  /** 只重新讀取這幾張任務 */
+  refresh: (numbers: number[]) => Promise<void>;
+  /** 調整順序（拖曳、鍵盤、上移下移按鈕共用） */
+  reorder: (moving: number, target: number, position: DropPosition) => void;
+}
+
+export interface Mutation {
+  /** 顯示同步中的任務 */
+  tasks: number[];
+  /** 寫回後要重新讀取的任務（預設同 tasks）；失敗時也是還原這些 */
+  refresh?: number[];
+  /** 先在畫面上生效的變化 */
+  optimistic?: (tree: LoadedTree) => LoadedTree;
+  write: () => Promise<unknown>;
 }
 
 // 「顯示已完成」是每位使用者自己的偏好，記在瀏覽器（#46）
@@ -78,7 +98,10 @@ export function ProjectView({
   repo: string;
   fullTask?: number | null;
 }) {
-  const [ctx, setCtx] = useState<Omit<ProjectCtx, "reload"> | null>(null);
+  type Loaded = Omit<ProjectCtx, "reload" | "mutate" | "refresh" | "reorder">;
+  const [ctx, setCtx] = useState<Loaded | null>(null);
+  const ctxRef = useRef<Loaded | null>(null);
+  ctxRef.current = ctx;
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<"tasks" | "settings">("tasks");
   const [selected, setSelected] = useState<number | null>(null);
@@ -99,30 +122,76 @@ export function ProjectView({
   showDoneRef.current = showDone;
   // 這次開啟後才完成的任務，留在清單上到重新整理為止，改錯了還能馬上改回來（#63）
   const keepDone = useRef(new Set<number>());
-  const prevTree = useRef<LoadedTree | null>(null);
 
+  /** 換上新的任務樹；記下剛完成的任務 */
+  const setTree = useCallback((update: (t: LoadedTree) => LoadedTree) => {
+    setCtx((c) => {
+      if (!c) return c;
+      const tree = update(c.tree);
+      newlyClosed(c.tree, tree).forEach((n) => keepDone.current.add(n));
+      return { ...c, tree };
+    });
+  }, []);
+
+  const loadTasks = useCallback(
+    () => loadTree(owner, repo, { includeClosed: showDoneRef.current, pin: [...pinned.current, ...keepDone.current] }),
+    [owner, repo],
+  );
+
+  /** 全部重新讀取：進入專案、回到畫面、改了設定 */
   const reload = useCallback(async () => {
     try {
       const [cfg, tree, people, permission, user] = await Promise.all([
         loadConfig(owner, repo),
-        loadTree(owner, repo, { includeClosed: showDoneRef.current, pin: [...pinned.current, ...keepDone.current] }),
+        loadTasks(),
         listAssignable(owner, repo),
         myPermission(owner, repo),
         gh<{ login: string }>("/user"),
       ]);
-      const prev = prevTree.current;
-      if (prev) {
-        for (const t of tree.byNumber.values()) {
-          if (t.state === "CLOSED" && prev.byNumber.get(t.number)?.state === "OPEN") keepDone.current.add(t.number);
-        }
-      }
-      prevTree.current = tree;
-      setCtx({ owner, repo, cfg, tree, people, permission, me: user.login });
+      setCtx((c) => {
+        if (c) newlyClosed(c.tree, tree).forEach((n) => keepDone.current.add(n));
+        return { owner, repo, cfg, tree, people, permission, me: user.login };
+      });
       setError(null);
     } catch (e) {
       setError((e as Error).message);
     }
-  }, [owner, repo]);
+  }, [owner, repo, loadTasks]);
+
+  /** 只重新讀取這幾張任務（#48） */
+  const refresh = useCallback(
+    async (numbers: number[]) => {
+      const cur = ctxRef.current?.tree;
+      if (!cur || numbers.length === 0) return;
+      const got = await fetchTasks(owner, repo, numbers, (n) => cur.byNumber.has(n));
+      setTree((t) => replaceTasks(t, got));
+    },
+    [owner, repo, setTree],
+  );
+
+  const mutate = useCallback(
+    async (label: string, op: Mutation) => {
+      const before = ctxRef.current?.tree;
+      const affected = op.refresh ?? op.tasks;
+      if (before && op.optimistic) setTree(op.optimistic);
+      try {
+        await track(
+          label,
+          async () => {
+            await op.write();
+            await refresh(affected);
+          },
+          op.tasks,
+        );
+      } catch (e) {
+        // 還原成操作前的樣子，再向 GitHub 確認實際狀態（可能只做了一半）
+        if (before && op.optimistic) setTree((t) => restoreTasks(t, before, affected));
+        void refresh(affected).catch(() => {});
+        throw e;
+      }
+    },
+    [refresh, setTree],
+  );
 
   async function toggleShowDone() {
     const next = !showDone;
@@ -131,22 +200,31 @@ export function ProjectView({
     writeShowDone(owner, repo, next);
     if (!next) keepDone.current.clear(); // 明確切回隱藏，就全部照規則隱藏
     setLoadingDone(true);
-    await reload();
+    try {
+      const tree = await loadTasks();
+      setTree(() => tree);
+    } catch (e) {
+      setError((e as Error).message);
+    }
     setLoadingDone(false);
   }
 
-  /** 拖曳與鍵盤共用：寫回 GitHub，期間顯示同步中（#53） */
-  function reorder(moving: number, target: number, position: DropPosition) {
-    if (!ctx) return;
-    const tree = ctx.tree;
-    void track(
-      "調整順序",
-      async () => {
-        if (await reorderTask(owner, repo, tree, moving, target, position)) await reload();
-      },
-      [moving],
-    ).catch(() => {});
-  }
+  /** 拖曳、鍵盤、上移下移共用：先在畫面上移好，再寫回 GitHub（#48、#53） */
+  const reorder = useCallback(
+    (moving: number, target: number, position: DropPosition) => {
+      const tree = ctxRef.current?.tree;
+      if (!tree) return;
+      const plan = planReorder(tree, moving, target, position);
+      if (!plan) return;
+      void mutate("調整順序", {
+        tasks: [moving],
+        refresh: reorderAffects(tree, moving, plan),
+        optimistic: (t) => applyReorder(t, moving, plan),
+        write: () => writeReorder(owner, repo, tree, moving, plan),
+      }).catch(() => {});
+    },
+    [owner, repo, mutate],
+  );
 
   // 篩選結果在下面才算得出來，鍵盤移動時用最新的（#57）
   const visibleRef = useRef<Set<number> | null>(null);
@@ -188,7 +266,7 @@ export function ProjectView({
   if (error) return <main className="page error">讀取失敗：{error}</main>;
   if (!ctx) return <main className="page muted">載入任務中…</main>;
 
-  const full: ProjectCtx = { ...ctx, reload };
+  const full: ProjectCtx = { ...ctx, reload, mutate, refresh, reorder };
 
   // 唯讀成員不能新增、排序、修改（#59）
   const canWrite = ["admin", "maintain", "write"].includes(ctx.permission);
@@ -286,8 +364,8 @@ export function ProjectView({
     const config = ctx!.cfg.config;
     try {
       await track("新增任務", async () => {
-        await createTask(owner, repo, title, null, config);
-        await reload();
+        const n = await createTask(owner, repo, title, null, config);
+        await refresh([n]);
       });
       setNewTitle("");
     } catch {

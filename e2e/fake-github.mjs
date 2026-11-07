@@ -7,6 +7,7 @@
 //   POST /__latency?ms=800     每個寫入延遲幾毫秒（看 loading 回饋）
 //   POST /__as?login=amy&role=write   切換登入者與權限（測多人與權限）
 //   GET  /__state              目前狀態（除錯用）
+//   GET  /__requests           上次查詢以來 App 呼叫了哪些 API（查詢後清空，#48 檢查請求數）
 //
 // 限制：沒有模擬 webhook 自動化（bot 補狀態、轉換規則還原、父任務自動完成）。
 
@@ -54,6 +55,7 @@ export class FakeGitHub {
     this.people = ["cain", "amy", "ben"];
     this.latency = 0;
     this.failures = [];
+    this.requests = [];
     this.files = new Map();
     this.nextId = 5000;
     this.nextComment = 9000;
@@ -262,6 +264,13 @@ export class FakeGitHub {
         repos[k] = { config: r.config, issues: [...r.issues.values()], children: Object.fromEntries(r.children) };
       return { status: 200, json: { me: this.me, repos } };
     }
+
+    if (path === "/__requests") {
+      const out = this.requests;
+      this.requests = [];
+      return { status: 200, json: out };
+    }
+    if (path.startsWith("/api/gh/")) this.requests.push(`${method} ${path.slice("/api/gh".length)}`);
 
     if (path === "/api/session") return { status: 200, json: { loggedIn: true, installUrl: "https://github.com/apps/rootask/installations/new" } };
 

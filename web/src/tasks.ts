@@ -1,7 +1,7 @@
 import { gh, graphql } from "./api";
 import { STATUS_PREFIX, isClosing, statusFromLabels, type ProjectConfig, type StatusDef } from "./config";
 import { mergeMeta, parseMeta, writeMeta, type TaskMeta } from "../../shared/meta";
-import { planMove, sortRoots, type DropPosition } from "../../shared/order";
+import { planMove, sortRoots, type DropPosition, type MovePlan } from "../../shared/order";
 
 /** GitHub 原生 sub-issues 的巢狀上限 */
 export const MAX_DEPTH = 8;
@@ -120,6 +120,29 @@ async function loadByNumbers(owner: string, repo: string, numbers: number[]): Pr
     .map(toTask);
 }
 
+/**
+ * 只重新讀取指定的任務（#48）。has(n) 為 false 的上層也一起補抓，樹才不會斷掉。
+ */
+export async function fetchTasks(
+  owner: string,
+  repo: string,
+  numbers: number[],
+  has: (n: number) => boolean,
+): Promise<Task[]> {
+  const out: Task[] = [];
+  const seen = new Set<number>();
+  let want = [...new Set(numbers)];
+  for (let round = 0; round <= MAX_DEPTH + 1 && want.length > 0; round++) {
+    want.forEach((n) => seen.add(n));
+    const got = await loadByNumbers(owner, repo, want);
+    out.push(...got);
+    want = [
+      ...new Set(got.map((t) => t.parent).filter((p): p is number => p !== null && !has(p) && !seen.has(p))),
+    ];
+  }
+  return out;
+}
+
 export interface LoadOptions {
   /** 也載入已關閉的任務（#46：預設不載入） */
   includeClosed?: boolean;
@@ -187,33 +210,35 @@ export function buildTree(tasks: Task[]): TaskTree {
   return { byNumber, children };
 }
 
-const orderable = (tree: TaskTree, n: number) => {
+export const orderable = (tree: TaskTree, n: number) => {
   const t = tree.byNumber.get(n)!;
   const parent = t.parent !== null && tree.byNumber.has(t.parent) ? t.parent : null;
   return { number: n, rank: t.meta.rank, parent };
 };
 
 /**
- * 把 moving 放到 target 的前或後（#42）。回傳 false 表示不能移動或位置沒變。
+ * 把 moving 放到 target 的前或後（#42）要怎麼做。回傳 null 表示不能移動或位置沒變。
  * 必要時先換父任務，再調整位置。
  */
-export async function reorderTask(
-  owner: string,
-  repo: string,
+export function planReorder(
   tree: TaskTree,
   moving: number,
   target: number,
   position: DropPosition,
-): Promise<boolean> {
-  if (moving === target) return false;
+): (MovePlan & { from: number | null }) | null {
+  if (moving === target) return null;
   const m = orderable(tree, moving);
   const t = orderable(tree, target);
-  if (t.parent !== m.parent && moveBlockReason(tree, moving, t.parent)) return false;
+  if (t.parent !== m.parent && moveBlockReason(tree, moving, t.parent)) return null;
   const plan = planMove(m, t, position, (p) => (tree.children.get(p) ?? []).map((n) => orderable(tree, n)));
-  if (plan.noop) return false;
+  return plan.noop ? null : { ...plan, from: m.parent };
+}
 
+/** 把排序計畫寫回 GitHub */
+export async function writeReorder(owner: string, repo: string, tree: TaskTree, moving: number, plan: MovePlan): Promise<void> {
   const task = tree.byNumber.get(moving)!;
-  if (plan.reparent) await moveTask(owner, repo, { ...task, parent: m.parent }, plan.parent);
+  const from = orderable(tree, moving).parent;
+  if (plan.reparent) await moveTask(owner, repo, { ...task, parent: from }, plan.parent);
 
   if (plan.parent === null) {
     await updateBody(owner, repo, moving, { meta: { rank: plan.rank } });
@@ -227,7 +252,6 @@ export async function reorderTask(
       },
     });
   }
-  return true;
 }
 
 /** 上移／下移一格（手機用） */
@@ -299,9 +323,9 @@ export async function createTask(
   title: string,
   parent: Task | null,
   config: ProjectConfig,
-): Promise<void> {
+): Promise<number> {
   const initial = config.statuses.find((s) => s.category === "todo") ?? config.statuses[0];
-  const issue = await gh<{ id: number }>(`/repos/${owner}/${repo}/issues`, {
+  const issue = await gh<{ id: number; number: number }>(`/repos/${owner}/${repo}/issues`, {
     method: "POST",
     json: { title, labels: [STATUS_PREFIX + initial.id] },
   });
@@ -311,6 +335,7 @@ export async function createTask(
       json: { sub_issue_id: issue.id },
     });
   }
+  return issue.number;
 }
 
 export async function moveTask(owner: string, repo: string, task: Task, newParent: number | null): Promise<void> {

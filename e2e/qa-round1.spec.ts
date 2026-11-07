@@ -18,6 +18,8 @@ test.describe("桌面", () => {
     await page.keyboard.press("ArrowUp");
     await expect.poll(() => rows(page)).toEqual(["官網改版", "行銷活動", LONG, "整理專案文件"]);
     await expect(grip).toBeFocused();
+    // 畫面會先移好（#48），同步完才接受下一次移動
+    await expect(row(page, "非常非常長")).not.toHaveClass(/syncing/);
     await page.keyboard.press("ArrowUp");
     await expect.poll(() => rows(page)).toEqual(["官網改版", LONG, "行銷活動", "整理專案文件"]);
     await expect(grip).toBeFocused();

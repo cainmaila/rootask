@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { isClosing, transitionAllowed } from "./config";
 import { isOverdue, metaError, todayLocal, type TaskMeta } from "../../shared/meta";
-import type { ProjectCtx } from "./ProjectView";
+import type { Mutation, ProjectCtx } from "./ProjectView";
+import { patchTask, reparent, statusPatch } from "./optimistic";
 import { AttachTextarea } from "./AttachTextarea";
 import { Markdown } from "./Markdown";
 import { track } from "./sync";
@@ -13,7 +14,6 @@ import {
   moveBlockReason,
   moveTask,
   neighbor,
-  reorderTask,
   setStatus,
   statusOf,
   updateBody,
@@ -63,6 +63,9 @@ export function TaskDetail({ n, ctx, close, full = false, expand, open }: Props)
   useEffect(() => {
     if (!editingBody) setBody(task.body ?? "");
   }, [task.body, editingBody]);
+  // 失敗還原、或別人改了標題與日期時，欄位跟著更新（#48）
+  useEffect(() => setTitle(task.title), [task.title]);
+  useEffect(() => setMeta(task.meta), [task.meta.start, task.meta.due]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     listComments(owner, repo, n).then(setComments, (e: Error) => setErr(e.message));
@@ -81,7 +84,10 @@ export function TaskDetail({ n, ctx, close, full = false, expand, open }: Props)
       return;
     }
     if (next.start === task.meta.start && next.due === task.meta.due) return;
-    void run("更新日期", () => updateBody(owner, repo, n, { meta: { start: next.start, due: next.due } }));
+    void run("更新日期", {
+      optimistic: (t) => patchTask(t, n, { meta: { ...task.meta, start: next.start, due: next.due } }),
+      write: () => updateBody(owner, repo, n, { meta: { start: next.start, due: next.due } }),
+    });
   }
   const overdue = !isClosing(status.category) && isOverdue(meta.due, todayLocal());
 
@@ -93,19 +99,15 @@ export function TaskDetail({ n, ctx, close, full = false, expand, open }: Props)
       .map((t) => ({ t, reason: moveBlockReason(ctx.tree, n, t.number), depth: depthOf(ctx.tree, t.number) }));
   }, [ctx.tree, n]);
 
-  /** 寫回 GitHub 並重新讀取；期間頂端列顯示同步中，失敗時頂端列提示並可重試（#53） */
-  async function run(label: string, fn: () => Promise<unknown>, tasks: number[] = [n]) {
+  /**
+   * 寫回 GitHub：先在畫面上生效，成功後只重新讀取這張任務（#48）；
+   * 期間頂端列顯示同步中，失敗時還原並在頂端列提示（#53）
+   */
+  async function run(label: string, op: Omit<Mutation, "tasks"> & { tasks?: number[] }) {
     setBusy(true);
     setErr(null);
     try {
-      await track(
-        label,
-        async () => {
-          await fn();
-          await ctx.reload();
-        },
-        tasks,
-      );
+      await ctx.mutate(label, { tasks: [n], ...op });
     } catch {
       /* 錯誤由頂端列顯示 */
     } finally {
@@ -115,7 +117,11 @@ export function TaskDetail({ n, ctx, close, full = false, expand, open }: Props)
 
   function saveBody() {
     setEditingBody(false);
-    if (body !== (task.body ?? "")) void run("更新說明", () => updateBody(owner, repo, n, { text: body }));
+    if (body !== (task.body ?? ""))
+      void run("更新說明", {
+        optimistic: (t) => patchTask(t, n, { body }),
+        write: () => updateBody(owner, repo, n, { text: body }),
+      });
   }
 
   const assigned = new Set(task.assignees.map((a) => a.login));
@@ -123,7 +129,12 @@ export function TaskDetail({ n, ctx, close, full = false, expand, open }: Props)
     const next = new Set(assigned);
     if (next.has(login)) next.delete(login);
     else if (next.size < MAX_ASSIGNEES) next.add(login);
-    void run("更新分配人", () => updateTask(owner, repo, n, { assignees: [...next] }));
+    const known = new Map([...ctx.people, ...task.assignees].map((p) => [p.login, p]));
+    void run("更新分配人", {
+      optimistic: (t) =>
+        patchTask(t, n, { assignees: [...next].map((login) => known.get(login) ?? { login, avatarUrl: "" }) }),
+      write: () => updateTask(owner, repo, n, { assignees: [...next] }),
+    });
   }
 
   const parent = task.parent !== null ? ctx.tree.byNumber.get(task.parent) : undefined;
@@ -171,7 +182,10 @@ export function TaskDetail({ n, ctx, close, full = false, expand, open }: Props)
       onBlur={() =>
         title.trim() &&
         title !== task.title &&
-        run("更新標題", () => updateTask(owner, repo, n, { title: title.trim() }))
+        run("更新標題", {
+          optimistic: (t) => patchTask(t, n, { title: title.trim() }),
+          write: () => updateTask(owner, repo, n, { title: title.trim() }),
+        })
       }
     />
   );
@@ -240,7 +254,12 @@ export function TaskDetail({ n, ctx, close, full = false, expand, open }: Props)
           disabled={busy || !canWrite}
           onChange={(e) => {
             const s = cfg.config.statuses.find((x) => x.id === e.target.value)!;
-            void run("改狀態", () => setStatus(owner, repo, task, s));
+            void run("改狀態", {
+              // 父任務的完成數也會變
+              refresh: [n, ...(task.parent !== null ? [task.parent] : [])],
+              optimistic: (t) => patchTask(t, n, statusPatch(task, s)),
+              write: () => setStatus(owner, repo, task, s),
+            });
           }}
         >
           {cfg.config.statuses
@@ -262,7 +281,11 @@ export function TaskDetail({ n, ctx, close, full = false, expand, open }: Props)
           disabled={busy || !canWrite}
           onChange={(e) => {
             const v = e.target.value === "" ? null : Number(e.target.value);
-            void run("移動任務", () => moveTask(owner, repo, task, v));
+            void run("移動任務", {
+              refresh: [n, task.parent, v].filter((x): x is number => x !== null),
+              optimistic: (t) => reparent(t, n, v),
+              write: () => moveTask(owner, repo, task, v),
+            });
           }}
         >
           <option value="">（最上層）</option>
@@ -286,9 +309,7 @@ export function TaskDetail({ n, ctx, close, full = false, expand, open }: Props)
                   key={dir}
                   className="btn small"
                   disabled={busy || !nb}
-                  onClick={() =>
-                    nb && run("調整順序", () => reorderTask(owner, repo, ctx.tree, n, nb.target, nb.position))
-                  }
+                  onClick={() => nb && ctx.reorder(n, nb.target, nb.position)}
                 >
                   {dir < 0 ? "↑ 上移" : "↓ 下移"}
                 </button>
@@ -393,11 +414,16 @@ export function TaskDetail({ n, ctx, close, full = false, expand, open }: Props)
         onSubmit={(e) => {
           e.preventDefault();
           if (!draft.trim()) return;
-          void run("送出留言", async () => {
+          // 留言不影響任務樹，不必重新讀取
+          setBusy(true);
+          setErr(null);
+          void track("送出留言", async () => {
             const c = await addComment(owner, repo, n, draft.trim());
             setComments((cs) => [...(cs ?? []), c]);
             setDraft("");
-          });
+          }, [n])
+            .catch(() => {})
+            .finally(() => setBusy(false));
         }}
       >
         <AttachTextarea

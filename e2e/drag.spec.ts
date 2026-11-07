@@ -41,7 +41,7 @@ test.describe("觸控", () => {
     const t = (await row(page, "行銷活動").boundingBox())!;
     await touchDrag(page, g, { x: g.x + 20, y: t.y + 6 });
     await expect.poll(() => rows(page)).toEqual(["官網改版", "整理專案文件", "行銷活動", expect.stringContaining("非常非常長")]);
-    expect((await issue(page, 13)).body).toContain('"rank":5.5');
+    await expect.poll(async () => (await issue(page, 13)).body).toContain('"rank":5.5');
     await expect(page.locator(".drag-ghost")).toHaveCount(0);
   });
 });

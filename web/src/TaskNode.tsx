@@ -59,8 +59,8 @@ export function TaskNode({ view, n, ctx, expanded, toggle, selected, select, dra
       await track(
         "新增子任務",
         async () => {
-          await createTask(ctx.owner, ctx.repo, t, task, ctx.cfg.config);
-          await ctx.reload();
+          const k = await createTask(ctx.owner, ctx.repo, t, task, ctx.cfg.config);
+          await ctx.refresh([k, n]);
         },
         [n],
       );
