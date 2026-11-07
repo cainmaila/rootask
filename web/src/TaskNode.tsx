@@ -14,6 +14,8 @@ export interface DragCtx {
   start: (n: number, e: React.PointerEvent<HTMLElement>) => void;
   /** 鍵盤：手把上按上下鍵移動一格 */
   moveBy: (n: number, dir: -1 | 1) => void;
+  /** 沒有寫入權限時不能排序（#59） */
+  enabled: boolean;
 }
 
 /** 篩選結果（#47）：null 表示沒有篩選 */
@@ -47,7 +49,7 @@ export function TaskNode({ view, n, ctx, expanded, toggle, selected, select, dra
   const [adding, setAdding] = useState(false);
   const [title, setTitle] = useState("");
   const [busy, setBusy] = useState(false);
-  const canAddChild = depthOf(ctx.tree, n) < MAX_DEPTH && kidTotal < MAX_CHILDREN;
+  const canAddChild = drag.enabled && depthOf(ctx.tree, n) < MAX_DEPTH && kidTotal < MAX_CHILDREN;
 
   async function addChild() {
     if (!title.trim()) return;
@@ -84,22 +86,27 @@ export function TaskNode({ view, n, ctx, expanded, toggle, selected, select, dra
         aria-busy={syncing}
         data-node={n}
       >
-        <button
-          type="button"
-          className="grip"
-          aria-label={`拖曳調整「${task.title}」的順序，也可以用上下鍵移動`}
-          title="拖曳調整順序（也可用上下鍵）"
-          disabled={syncing}
-          onPointerDown={(e) => drag.start(n, e)}
-          onKeyDown={(e) => {
-            if (e.key === "ArrowUp" || e.key === "ArrowDown") {
-              e.preventDefault();
-              drag.moveBy(n, e.key === "ArrowUp" ? -1 : 1);
-            }
-          }}
-        >
-          <span aria-hidden>⋮⋮</span>
-        </button>
+        {drag.enabled ? (
+          <button
+            type="button"
+            className="grip"
+            aria-label={`拖曳調整「${task.title}」的順序，也可以用上下鍵移動`}
+            title="拖曳調整順序（也可用上下鍵）"
+            // 同步中不能用 disabled：會把鍵盤焦點踢走，無法連續移動（#56）
+            aria-disabled={syncing}
+            onPointerDown={(e) => !syncing && drag.start(n, e)}
+            onKeyDown={(e) => {
+              if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+                e.preventDefault();
+                if (!syncing) drag.moveBy(n, e.key === "ArrowUp" ? -1 : 1);
+              }
+            }}
+          >
+            <span aria-hidden>⋮⋮</span>
+          </button>
+        ) : (
+          <span className="grip-space" aria-hidden />
+        )}
         <button
           className="twisty"
           aria-label={open ? "收合" : "展開"}
@@ -145,7 +152,13 @@ export function TaskNode({ view, n, ctx, expanded, toggle, selected, select, dra
             void addChild();
           }}
         >
-          <input autoFocus value={title} onChange={(e) => setTitle(e.target.value)} placeholder="子任務名稱…" disabled={busy} />
+          <input
+            autoFocus
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="子任務名稱…"
+            disabled={busy}
+          />
           <button className="btn small primary" disabled={busy || !title.trim()}>
             新增
           </button>
@@ -154,7 +167,17 @@ export function TaskNode({ view, n, ctx, expanded, toggle, selected, select, dra
       {open && kids.length > 0 && (
         <ul className="nodes">
           {kids.map((k) => (
-            <TaskNode key={k} view={view} n={k} ctx={ctx} expanded={expanded} toggle={toggle} selected={selected} select={select} drag={drag} />
+            <TaskNode
+              key={k}
+              view={view}
+              n={k}
+              ctx={ctx}
+              expanded={expanded}
+              toggle={toggle}
+              selected={selected}
+              select={select}
+              drag={drag}
+            />
           ))}
         </ul>
       )}

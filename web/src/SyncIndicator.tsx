@@ -9,9 +9,11 @@ export function SyncIndicator() {
         <span className="sync-msg" title={s.error.message}>
           ⚠ {s.error.message}
         </span>
-        <button className="btn small" onClick={s.error.retry}>
-          重試
-        </button>
+        {s.error.retry && (
+          <button className="btn small" onClick={s.error.retry}>
+            重試
+          </button>
+        )}
         <button className="icon" onClick={dismissSyncError} aria-label="關閉">
           ✕
         </button>

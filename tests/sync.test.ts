@@ -40,12 +40,22 @@ describe("同步狀態（#53）", () => {
     };
     await expect(track("調整順序", fn, [5])).rejects.toThrow("網路中斷");
     const s = getSyncState();
-    expect(s.error?.message).toBe("調整順序失敗：網路中斷");
+    expect(s.error?.message).toBe("調整順序（#5）失敗：網路中斷");
     expect(s.justSynced).toBe(false);
     expect(s.tasks.has(5)).toBe(false);
     s.error!.retry();
     await vi.runAllTimersAsync();
     expect(calls).toBe(2);
     expect(getSyncState().error).toBeNull();
+  });
+
+  it("權限不足等 4xx 錯誤不提供重試，5xx 與網路錯誤可以重試", async () => {
+    const { ApiError } = await import("../web/src/api");
+    await expect(track("改狀態", () => Promise.reject(new ApiError(403, "沒有寫入權限")), [3])).rejects.toThrow();
+    expect(getSyncState().error).toMatchObject({ message: "改狀態（#3）失敗：沒有寫入權限", retry: null });
+    await expect(track("改狀態", () => Promise.reject(new ApiError(503, "暫時無法服務")))).rejects.toThrow();
+    expect(getSyncState().error?.retry).toBeTypeOf("function");
+    await expect(track("改狀態", () => Promise.reject(new ApiError(429, "太多請求")))).rejects.toThrow();
+    expect(getSyncState().error?.retry).toBeTypeOf("function");
   });
 });

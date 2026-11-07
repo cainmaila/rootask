@@ -231,9 +231,15 @@ export async function reorderTask(
 }
 
 /** 上移／下移一格（手機用） */
-export function neighbor(tree: TaskTree, n: number, dir: -1 | 1): { target: number; position: DropPosition } | null {
+export function neighbor(
+  tree: TaskTree,
+  n: number,
+  dir: -1 | 1,
+  /** 篩選中只在看得到的任務之間移動（#57） */
+  visible?: Set<number> | null,
+): { target: number; position: DropPosition } | null {
   const p = orderable(tree, n).parent;
-  const sibs = tree.children.get(p) ?? [];
+  const sibs = (tree.children.get(p) ?? []).filter((k) => k === n || !visible || visible.has(k));
   const i = sibs.indexOf(n);
   const j = i + dir;
   if (i < 0 || j < 0 || j >= sibs.length) return null;

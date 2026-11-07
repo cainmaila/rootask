@@ -21,7 +21,7 @@ test("寫入失敗時提示，按重試後成功", async ({ page }) => {
   await row(page, "整理專案文件").locator(".node-title").click();
   await page.locator("aside.detail").getByLabel("狀態", { exact: true }).selectOption("doing");
   const alert = page.getByRole("alert");
-  await expect(alert).toContainText("改狀態失敗");
+  await expect(alert).toContainText("改狀態（#13）失敗");
   expect((await issue(page, 13)).labels).toContain("status:todo");
   await alert.getByRole("button", { name: "重試" }).click();
   await expect(page.getByText("✓ 已同步")).toBeVisible();

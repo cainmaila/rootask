@@ -45,6 +45,8 @@ export function TaskDetail({ n, ctx, close, full = false, expand, open }: Props)
   const { owner, repo, cfg } = ctx;
   const status = statusOf(task, cfg.config);
   const threshold = cfg.config.attachment_threshold_mb ?? 10;
+  // 唯讀成員：可以看、可以留言，不能修改（#59）
+  const canWrite = ["admin", "maintain", "write"].includes(ctx.permission);
 
   const [title, setTitle] = useState(task.title);
   const [body, setBody] = useState(task.body ?? "");
@@ -148,7 +150,12 @@ export function TaskDetail({ n, ctx, close, full = false, expand, open }: Props)
             ⤢
           </button>
         )}
-        <button className="icon" onClick={close} aria-label={full ? "回到任務列表" : "關閉"} title={full ? "回到任務列表" : "關閉"}>
+        <button
+          className="icon"
+          onClick={close}
+          aria-label={full ? "回到任務列表" : "關閉"}
+          title={full ? "回到任務列表" : "關閉"}
+        >
           {full ? "⤡" : "✕"}
         </button>
       </span>
@@ -158,9 +165,14 @@ export function TaskDetail({ n, ctx, close, full = false, expand, open }: Props)
   const titleInput = (
     <input
       className="title-input"
+      readOnly={!canWrite}
       value={title}
       onChange={(e) => setTitle(e.target.value)}
-      onBlur={() => title.trim() && title !== task.title && run("更新標題", () => updateTask(owner, repo, n, { title: title.trim() }))}
+      onBlur={() =>
+        title.trim() &&
+        title !== task.title &&
+        run("更新標題", () => updateTask(owner, repo, n, { title: title.trim() }))
+      }
     />
   );
 
@@ -168,7 +180,7 @@ export function TaskDetail({ n, ctx, close, full = false, expand, open }: Props)
     <div className="field">
       <span className="field-head">
         說明
-        {!editingBody && (
+        {canWrite && !editingBody && (
           <button className="link-btn small" onClick={() => setEditingBody(true)}>
             編輯
           </button>
@@ -205,13 +217,15 @@ export function TaskDetail({ n, ctx, close, full = false, expand, open }: Props)
           }
         />
       ) : body.trim() ? (
-        <div className="description" onDoubleClick={() => setEditingBody(true)}>
+        <div className="description" onDoubleClick={() => canWrite && setEditingBody(true)}>
           <Markdown text={body} />
         </div>
-      ) : (
+      ) : canWrite ? (
         <button className="description empty" onClick={() => setEditingBody(true)}>
           加上說明或圖片…
         </button>
+      ) : (
+        <p className="muted small">沒有說明</p>
       )}
     </div>
   );
@@ -223,7 +237,7 @@ export function TaskDetail({ n, ctx, close, full = false, expand, open }: Props)
         <select
           aria-label="狀態"
           value={status.id}
-          disabled={busy}
+          disabled={busy || !canWrite}
           onChange={(e) => {
             const s = cfg.config.statuses.find((x) => x.id === e.target.value)!;
             void run("改狀態", () => setStatus(owner, repo, task, s));
@@ -245,7 +259,7 @@ export function TaskDetail({ n, ctx, close, full = false, expand, open }: Props)
         <select
           aria-label="父任務"
           value={task.parent ?? ""}
-          disabled={busy}
+          disabled={busy || !canWrite}
           onChange={(e) => {
             const v = e.target.value === "" ? null : Number(e.target.value);
             void run("移動任務", () => moveTask(owner, repo, task, v));
@@ -261,24 +275,28 @@ export function TaskDetail({ n, ctx, close, full = false, expand, open }: Props)
         </select>
       </label>
 
-      <div className="field">
-        <span>順序（桌面版可直接在列表拖曳）</span>
-        <div className="row-gap">
-          {([-1, 1] as const).map((dir) => {
-            const nb = neighbor(ctx.tree, n, dir);
-            return (
-              <button
-                key={dir}
-                className="btn small"
-                disabled={busy || !nb}
-                onClick={() => nb && run("調整順序", () => reorderTask(owner, repo, ctx.tree, n, nb.target, nb.position))}
-              >
-                {dir < 0 ? "↑ 上移" : "↓ 下移"}
-              </button>
-            );
-          })}
+      {canWrite && (
+        <div className="field">
+          <span>順序（也可以用列表左側的 ⋮⋮ 手把拖曳）</span>
+          <div className="row-gap">
+            {([-1, 1] as const).map((dir) => {
+              const nb = neighbor(ctx.tree, n, dir);
+              return (
+                <button
+                  key={dir}
+                  className="btn small"
+                  disabled={busy || !nb}
+                  onClick={() =>
+                    nb && run("調整順序", () => reorderTask(owner, repo, ctx.tree, n, nb.target, nb.position))
+                  }
+                >
+                  {dir < 0 ? "↑ 上移" : "↓ 下移"}
+                </button>
+              );
+            })}
+          </div>
         </div>
-      </div>
+      )}
 
       <div className="field">
         <span>預計時間</span>
@@ -289,7 +307,7 @@ export function TaskDetail({ n, ctx, close, full = false, expand, open }: Props)
               type="date"
               value={meta.start ?? ""}
               max={meta.due}
-              disabled={busy}
+              disabled={busy || !canWrite}
               onChange={(e) => saveDates({ ...meta, start: e.target.value || undefined })}
             />
           </label>
@@ -299,7 +317,7 @@ export function TaskDetail({ n, ctx, close, full = false, expand, open }: Props)
               type="date"
               value={meta.due ?? ""}
               min={meta.start}
-              disabled={busy}
+              disabled={busy || !canWrite}
               onChange={(e) => saveDates({ ...meta, due: e.target.value || undefined })}
             />
           </label>
@@ -321,7 +339,7 @@ export function TaskDetail({ n, ctx, close, full = false, expand, open }: Props)
             <button
               key={p.login}
               className={`person ${assigned.has(p.login) ? "on" : ""}`}
-              disabled={busy || (!assigned.has(p.login) && assigned.size >= MAX_ASSIGNEES)}
+              disabled={!canWrite || busy || (!assigned.has(p.login) && assigned.size >= MAX_ASSIGNEES)}
               onClick={() => toggleAssignee(p.login)}
             >
               <img className="avatar" src={p.avatarUrl} alt="" />

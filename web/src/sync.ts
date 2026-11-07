@@ -1,10 +1,18 @@
 // 與 GitHub 同步的狀態（#53）。所有寫回 GitHub 的操作都用 track() 包起來，
 // 頂端列與任務列就能顯示「同步中」「已同步」「同步失敗（可重試）」。
 import { useSyncExternalStore } from "react";
+import { ApiError } from "./api";
 
 export interface SyncError {
   message: string;
-  retry: () => void;
+  /** 權限不足、資料不合法這類錯誤重試也不會成功，不提供重試（#59） */
+  retry: (() => void) | null;
+}
+
+/** 4xx（逾時與流量限制除外）重試也不會成功 */
+export function isRetryable(e: unknown): boolean {
+  if (!(e instanceof ApiError)) return true; // 網路中斷等
+  return e.status >= 500 || e.status === 408 || e.status === 429 || e.status === 0;
 }
 
 export interface SyncState {
@@ -51,10 +59,12 @@ export async function track<T>(label: string, fn: () => Promise<T>, tasks: numbe
     ok = true;
     return r;
   } catch (e) {
+    // 只有一張任務時標出是哪一張，同時做好幾件事時才分得清
+    const which = tasks.length === 1 ? `（#${tasks[0]}）` : "";
     set({
       error: {
-        message: `${label}失敗：${(e as Error).message}`,
-        retry: () => void track(label, fn, tasks).catch(() => {}),
+        message: `${label}${which}失敗：${(e as Error).message}`,
+        retry: isRetryable(e) ? () => void track(label, fn, tasks).catch(() => {}) : null,
       },
     });
     throw e;

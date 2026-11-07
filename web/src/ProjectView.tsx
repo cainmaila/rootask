@@ -69,7 +69,15 @@ function canDropIn(tree: TaskTree, moving: number, target: number): boolean {
 const projectHash = (owner: string, repo: string) => `#/p/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
 const taskHash = (owner: string, repo: string, n: number) => `${projectHash(owner, repo)}/t/${n}`;
 
-export function ProjectView({ owner, repo, fullTask = null }: { owner: string; repo: string; fullTask?: number | null }) {
+export function ProjectView({
+  owner,
+  repo,
+  fullTask = null,
+}: {
+  owner: string;
+  repo: string;
+  fullTask?: number | null;
+}) {
   const [ctx, setCtx] = useState<Omit<ProjectCtx, "reload"> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<"tasks" | "settings">("tasks");
@@ -129,8 +137,12 @@ export function ProjectView({ owner, repo, fullTask = null }: { owner: string; r
     ).catch(() => {});
   }
 
+  // 篩選結果在下面才算得出來，鍵盤移動時用最新的（#57）
+  const visibleRef = useRef<Set<number> | null>(null);
+  const rootList = useRef<HTMLUListElement>(null);
+
   function moveBy(n: number, dir: -1 | 1) {
-    const nb = ctx && neighbor(ctx.tree, n, dir);
+    const nb = ctx && neighbor(ctx.tree, n, dir, visibleRef.current);
     if (nb) reorder(n, nb.target, nb.position);
   }
 
@@ -139,6 +151,19 @@ export function ProjectView({ owner, repo, fullTask = null }: { owner: string; r
     canDrop: (moving, target) => !!ctx && canDropIn(ctx.tree, moving, target),
     drop: reorder,
     titleOf: (n) => ctx?.tree.byNumber.get(n)?.title ?? `#${n}`,
+    // 最後一列下方的空白處（含手機自動捲到底時手指停在畫面底緣）＝放到最上層的最後（#61）
+    fallback: (moving, x, y) => {
+      const ul = rootList.current;
+      if (!ul || !ctx) return null;
+      const r = ul.getBoundingClientRect();
+      if (x < r.left || x > r.right || y < r.bottom - 2) return null;
+      const roots = [...ul.children]
+        .map((li) => Number((li.querySelector(":scope > .node") as HTMLElement | null)?.dataset.node))
+        .filter((k) => !Number.isNaN(k));
+      const last = roots[roots.length - 1];
+      if (last === undefined || last === moving || !canDropIn(ctx.tree, moving, last)) return null;
+      return { n: last, position: "after", end: true };
+    },
   });
 
   useEffect(() => {
@@ -154,7 +179,16 @@ export function ProjectView({ owner, repo, fullTask = null }: { owner: string; r
 
   const full: ProjectCtx = { ...ctx, reload };
 
-  const drag: DragCtx = { dragging: treeDrag.dragging, over: treeDrag.over, start: treeDrag.start, moveBy };
+  // 唯讀成員不能新增、排序、修改（#59）
+  const canWrite = ["admin", "maintain", "write"].includes(ctx.permission);
+  const drag: DragCtx = {
+    dragging: treeDrag.dragging,
+    // 放到最後時，放置線畫在清單底部，不畫在最後一列上（它可能展開著子任務）
+    over: treeDrag.over?.end ? null : treeDrag.over,
+    start: treeDrag.start,
+    moveBy,
+    enabled: canWrite,
+  };
 
   // 整頁任務檢視（#41）：網址 #/p/<owner>/<repo>/t/<n>，可直接分享
   if (fullTask !== null) {
@@ -206,6 +240,7 @@ export function ProjectView({ owner, repo, fullTask = null }: { owner: string; r
       )
     : null;
   const view: TreeView | null = result && { visible: result.visible, matches: result.matches };
+  visibleRef.current = view?.visible ?? null;
   const effExpanded = result
     ? new Set(
         [...ctx.tree.byNumber.keys()].filter((n) =>
@@ -216,7 +251,9 @@ export function ProjectView({ owner, repo, fullTask = null }: { owner: string; r
   const roots = (ctx.tree.children.get(null) ?? []).filter((n) => !view || view.visible.has(n));
   // 篩選「已完成」類的狀態，但已完成的任務被隱藏著
   const filterNeedsDone =
-    !showDone && !!filter.status && isClosing(ctx.cfg.config.statuses.find((s) => s.id === filter.status)?.category ?? "todo");
+    !showDone &&
+    !!filter.status &&
+    isClosing(ctx.cfg.config.statuses.find((s) => s.id === filter.status)?.category ?? "todo");
 
   const toggle = (n: number) => {
     if (result) {
@@ -293,23 +330,30 @@ export function ProjectView({ owner, repo, fullTask = null }: { owner: string; r
       ) : (
         <div className={`split ${selected !== null ? "has-detail" : ""}`}>
           <section className="tree">
-            <form
-              className="add-row"
-              onSubmit={(e) => {
-                e.preventDefault();
-                void addRoot();
-              }}
-            >
-              <input
-                value={newTitle}
-                onChange={(e) => setNewTitle(e.target.value)}
-                placeholder="新增任務…"
-                disabled={busy}
-              />
-              <button className="btn primary" disabled={busy || !newTitle.trim()}>
-                新增
-              </button>
-            </form>
+            {!canWrite && (
+              <p className="banner small" role="note">
+                你在這個專案只有讀取權限：可以瀏覽與留言，不能新增、修改或調整順序。
+              </p>
+            )}
+            {canWrite && (
+              <form
+                className="add-row"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void addRoot();
+                }}
+              >
+                <input
+                  value={newTitle}
+                  onChange={(e) => setNewTitle(e.target.value)}
+                  placeholder="新增任務…"
+                  disabled={busy}
+                />
+                <button className="btn primary" disabled={busy || !newTitle.trim()}>
+                  新增
+                </button>
+              </form>
+            )}
             <FilterBar
               filter={filter}
               onChange={setFilter}
@@ -324,9 +368,9 @@ export function ProjectView({ owner, repo, fullTask = null }: { owner: string; r
             {filtering && roots.length === 0 && (
               <div className="muted empty">
                 <p>沒有符合的任務。</p>
-                {filterNeedsDone && (
+                {(filterNeedsDone || (!showDone && ctx.tree.closedCount > 0)) && (
                   <p>
-                    這個狀態的任務已完成而被隱藏了，
+                    {filterNeedsDone ? "這個狀態的任務已完成而被隱藏了，" : "已完成的任務被隱藏了，要找的可能在裡面，"}
                     <button className="link-btn" onClick={() => void toggleShowDone()}>
                       顯示已完成
                     </button>
@@ -343,7 +387,15 @@ export function ProjectView({ owner, repo, fullTask = null }: { owner: string; r
                 {!showDone && ctx.tree.closedCount > 0 ? "目前沒有未完成的任務 🎉" : "還沒有任務，從上面新增第一個吧。"}
               </p>
             )}
-            <ul className="nodes">
+            {filtering && !showDone && ctx.tree.closedCount > 0 && roots.length > 0 && (
+              <p className="muted small filter-hint">
+                已完成的任務沒有列入搜尋。
+                <button className="link-btn" onClick={() => void toggleShowDone()}>
+                  顯示已完成
+                </button>
+              </p>
+            )}
+            <ul className="nodes" ref={rootList}>
               {roots.map((n) => (
                 <TaskNode
                   key={n}
@@ -357,6 +409,7 @@ export function ProjectView({ owner, repo, fullTask = null }: { owner: string; r
                   drag={drag}
                 />
               ))}
+              {treeDrag.over?.end && <li className="drop-end" aria-hidden />}
             </ul>
           </section>
           {selected !== null && ctx.tree.byNumber.has(selected) && (

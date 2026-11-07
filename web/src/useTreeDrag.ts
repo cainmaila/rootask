@@ -8,6 +8,8 @@ export type DropPosition = "before" | "after";
 export interface Over {
   n: number;
   position: DropPosition;
+  /** 放在整個清單的最後（指標在最後一列下方的空白處，#61） */
+  end?: boolean;
 }
 
 /** 指標移動超過這個距離才算開始拖曳（避免只是按一下手把） */
@@ -33,15 +35,17 @@ interface Options {
   canDrop: (moving: number, target: number) => boolean;
   drop: (moving: number, target: number, position: DropPosition) => void;
   titleOf: (n: number) => string;
+  /** 指標不在任何一列上時的放置目標（例如清單最下方的空白處） */
+  fallback?: (moving: number, x: number, y: number) => Over | null;
 }
 
-export function useTreeDrag({ canDrop, drop, titleOf }: Options) {
+export function useTreeDrag({ canDrop, drop, titleOf, fallback }: Options) {
   const [dragging, setDragging] = useState<number | null>(null);
   const [over, setOver] = useState<Over | null>(null);
 
   // 最新的 callback 放 ref，事件處理器不必重新綁定
-  const opts = useRef({ canDrop, drop, titleOf });
-  opts.current = { canDrop, drop, titleOf };
+  const opts = useRef({ canDrop, drop, titleOf, fallback });
+  opts.current = { canDrop, drop, titleOf, fallback };
 
   type St = {
     n: number;
@@ -90,7 +94,8 @@ export function useTreeDrag({ canDrop, drop, titleOf }: Options) {
       if (el && target !== st.n && opts.current.canDrop(st.n, target)) {
         next = { n: target, position: positionFor(el.getBoundingClientRect(), st.y) };
       }
-      if (next?.n !== st.over?.n || next?.position !== st.over?.position) {
+      if (!el) next = opts.current.fallback?.(st.n, st.x, st.y) ?? null;
+      if (next?.n !== st.over?.n || next?.position !== st.over?.position || next?.end !== st.over?.end) {
         st.over = next;
         setOver(next);
       }
