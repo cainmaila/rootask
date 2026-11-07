@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { reset } from "./helpers";
+import { center, reset, touchDrag } from "./helpers";
 
 // 看板（#43、#82）：欄位＝自訂狀態，卡片＝任務，欄內照任務樹順序
 const BOARD = "/#/p/demo/website/board";
@@ -97,4 +97,125 @@ test("手機：欄位在看板裡橫向滑動，頁面本身不會左右捲", as
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
   await card(page, "Hero 主視覺").locator(".board-card-main").tap();
   await expect(page.locator("aside.detail .title-input")).toHaveValue("Hero 主視覺");
+});
+
+// ---------- 拖曳（#83 換欄＝改狀態、#84 欄內排序） ----------
+
+async function serverIssue(page: Page, title: string) {
+  const st = await (await page.request.get("/__state")).json();
+  const r = st.repos["demo/website"];
+  const i = (r.issues as { number: number; title: string; labels: string[]; parent: number | null }[]).find((x) => x.title === title)!;
+  return { ...i, siblings: (r.children[String(i.parent)] ?? []) as number[] };
+}
+
+/** 用滑鼠拖卡片的手把到某個位置 */
+async function mouseDrag(page: Page, title: string, to: { x: number; y: number }, release = true) {
+  await card(page, title).hover();
+  const g = center((await card(page, title).locator(".grip").boundingBox())!);
+  await page.mouse.move(g.x, g.y);
+  await page.mouse.down();
+  await page.mouse.move(g.x + 10, g.y + 10, { steps: 3 });
+  await page.mouse.move(to.x, to.y, { steps: 12 });
+  if (release) await page.mouse.up();
+}
+
+const colCenter = async (page: Page, name: string) => {
+  const b = (await col(page, name).boundingBox())!;
+  return { x: b.x + b.width / 2, y: b.y + Math.min(b.height - 20, 90) };
+};
+
+test.describe("看板拖曳（桌面）", () => {
+  test.skip(({ isMobile }) => !!isMobile, "只在桌面");
+
+  test("#83 拖到別欄＝改狀態：畫面先換欄，GitHub 上的標籤跟著改", async ({ page }) => {
+    await openBoard(page);
+    await mouseDrag(page, "上傳圖片 API", await colCenter(page, "進行中"));
+    await expect.poll(() => cards(page, "進行中")).toContain("上傳圖片 API");
+    await expect.poll(async () => (await serverIssue(page, "上傳圖片 API")).labels).toContain("status:doing");
+  });
+
+  test("#83 轉換規則不允許的欄位：拖曳中淡化並標示，放下也不會改", async ({ page }) => {
+    await page.request.post("/__as?login=amy&role=write");
+    await openBoard(page);
+    await mouseDrag(page, "導覽列互動", await colCenter(page, "完成"), false);
+    await expect(col(page, "完成")).toHaveClass(/drop-no/);
+    await expect(col(page, "完成")).toContainText("轉換規則不允許");
+    await page.mouse.up();
+    await page.waitForTimeout(400);
+    expect(await cards(page, "待審核")).toContain("導覽列互動");
+    expect((await serverIssue(page, "導覽列互動")).labels).toContain("status:review");
+  });
+
+  test("#84 同一欄、同一個父任務：上下拖曳＝在任務樹中移動", async ({ page }) => {
+    await openBoard(page);
+    const target = (await card(page, "文章列表 API").boundingBox())!;
+    await mouseDrag(page, "上傳圖片 API", { x: target.x + target.width / 2, y: target.y + 6 });
+    const todo = await cards(page, "待處理");
+    expect(todo.indexOf("上傳圖片 API")).toBeLessThan(todo.indexOf("文章列表 API"));
+    const up = await serverIssue(page, "上傳圖片 API");
+    const art = await serverIssue(page, "文章列表 API");
+    await expect.poll(async () => {
+      const sibs = (await serverIssue(page, "上傳圖片 API")).siblings;
+      return sibs.indexOf(up.number) < sibs.indexOf(art.number);
+    }).toBe(true);
+    // 任務樹的順序也跟著變（共用同一個順序）
+    await page.getByRole("button", { name: "任務樹" }).click();
+    await page.locator(".node", { has: page.locator(".node-title", { hasText: "官網改版" }) }).first().locator(".twisty").click();
+    await page.locator(".node", { has: page.locator(".node-title", { hasText: "後台 API" }) }).first().locator(".twisty").click();
+    const tree = await page.locator(".node-title").allInnerTexts();
+    expect(tree.indexOf("上傳圖片 API")).toBeLessThan(tree.indexOf("文章列表 API"));
+  });
+
+  test("#84 不同父任務的卡片不能互換：標示提示，放下不改", async ({ page }) => {
+    await openBoard(page);
+    const before = await cards(page, "待處理");
+    const target = (await card(page, "Hero 主視覺").boundingBox())!;
+    await mouseDrag(page, "上傳圖片 API", { x: target.x + target.width / 2, y: target.y + 6 }, false);
+    await expect(card(page, "Hero 主視覺")).toHaveClass(/drop-no/);
+    await expect(card(page, "Hero 主視覺")).toHaveAttribute("data-hint", "不同父任務，不能互換位置");
+    await page.mouse.up();
+    await page.waitForTimeout(400);
+    expect(await cards(page, "待處理")).toEqual(before);
+  });
+
+  test("鍵盤：左右換欄、上下在同一個父任務的卡片間移動", async ({ page }) => {
+    await openBoard(page);
+    const grip = card(page, "上傳圖片 API").locator(".grip");
+    await grip.focus();
+    await page.keyboard.press("ArrowUp");
+    await expect.poll(async () => {
+      const todo = await cards(page, "待處理");
+      return todo.indexOf("上傳圖片 API") < todo.indexOf("文章列表 API");
+    }).toBe(true);
+    await expect(card(page, "上傳圖片 API")).not.toHaveClass(/syncing/);
+    await card(page, "上傳圖片 API").locator(".grip").focus();
+    await page.keyboard.press("ArrowRight");
+    await expect.poll(() => cards(page, "進行中")).toContain("上傳圖片 API");
+  });
+
+  test("唯讀成員沒有手把；triage 可以換欄但不能在欄內排序", async ({ page }) => {
+    await page.request.post("/__as?login=amy&role=read");
+    await openBoard(page);
+    await expect(page.locator(".board-card .grip")).toHaveCount(0);
+    await page.request.post("/__as?login=amy&role=triage");
+    await page.reload();
+    await expect(page.locator(".board-card .grip").first()).toBeAttached();
+    const before = await cards(page, "待處理");
+    await card(page, "上傳圖片 API").locator(".grip").focus();
+    await page.keyboard.press("ArrowUp");
+    await page.waitForTimeout(400);
+    expect(await cards(page, "待處理")).toEqual(before);
+    await page.keyboard.press("ArrowRight");
+    await expect.poll(() => cards(page, "進行中")).toContain("上傳圖片 API");
+  });
+});
+
+test("#83 手機：用手把觸控拖到別欄", async ({ page, isMobile }) => {
+  test.skip(!isMobile, "只在手機");
+  await openBoard(page);
+  // 先把「進行中」欄捲進畫面一半，拖過去
+  const g = center((await card(page, "Hero 主視覺").locator(".grip").boundingBox())!);
+  const vw = page.viewportSize()!.width;
+  await touchDrag(page, g, { x: vw - 20, y: g.y + 40 }, 30);
+  await expect.poll(async () => (await serverIssue(page, "Hero 主視覺")).labels, { timeout: 5000 }).toContain("status:doing");
 });

@@ -1,7 +1,7 @@
-// 以手把拖曳排序（#54）。用 Pointer Events 自己實作，滑鼠與觸控共用同一套：
+// 以手把拖曳（#54）。用 Pointer Events 自己實作，滑鼠與觸控共用同一套：
 // - 只有手把能開始拖曳；列的其他地方點了是開啟、滑動是捲動，不會誤觸
-// - 拖曳時有跟著指標的影像、放置線，接近畫面上下緣自動捲動
-// 之後看板（#43）也沿用。
+// - 拖曳時有跟著指標的影像、放置標示，接近畫面上下緣（與橫向捲動容器左右緣）自動捲動
+// 任務樹（useTreeDrag）與看板（#83、#84）共用 usePointerDrag，只差在「指標下面是什麼」。
 import { useEffect, useMemo, useRef, useState } from "react";
 
 export type DropPosition = "before" | "after";
@@ -24,28 +24,31 @@ export function positionFor(rect: { top: number; height: number }, y: number): D
   return y < rect.top + rect.height / 2 ? "before" : "after";
 }
 
-/** 自動捲動速度：負值往上、正值往下、0 不捲 */
-export function scrollSpeed(y: number, viewport: number): number {
-  if (y < EDGE) return -Math.ceil(((EDGE - Math.max(y, 0)) / EDGE) * MAX_SPEED);
-  if (y > viewport - EDGE) return Math.ceil(((y - (viewport - EDGE)) / EDGE) * MAX_SPEED);
+/** 自動捲動速度：負值往上（左）、正值往下（右）、0 不捲；start／end 是可視範圍的兩端 */
+export function scrollSpeed(p: number, end: number, start = 0): number {
+  if (p < start + EDGE) return -Math.ceil(((start + EDGE - Math.max(p, start)) / EDGE) * MAX_SPEED);
+  if (p > end - EDGE) return Math.ceil(((Math.min(p, end) - (end - EDGE)) / EDGE) * MAX_SPEED);
   return 0;
 }
 
-interface Options {
-  canDrop: (moving: number, target: number) => boolean;
-  drop: (moving: number, target: number, position: DropPosition) => void;
+export interface PointerDragOptions<T> {
+  /** 指標在 (x, y) 時的放置目標；null 表示不能放 */
+  hitTest: (moving: number, x: number, y: number) => T | null;
+  /** 兩個目標是否相同（相同就不必重繪） */
+  same: (a: T | null, b: T | null) => boolean;
+  drop: (moving: number, target: T) => void;
   titleOf: (n: number) => string;
-  /** 指標不在任何一列上時的放置目標（例如清單最下方的空白處） */
-  fallback?: (moving: number, x: number, y: number) => Over | null;
+  /** 會橫向捲動的容器（看板）：指標接近它的左右緣時跟著捲 */
+  scrollX?: () => HTMLElement | null;
 }
 
-export function useTreeDrag({ canDrop, drop, titleOf, fallback }: Options) {
+export function usePointerDrag<T>(options: PointerDragOptions<T>) {
   const [dragging, setDragging] = useState<number | null>(null);
-  const [over, setOver] = useState<Over | null>(null);
+  const [over, setOver] = useState<T | null>(null);
 
   // 最新的 callback 放 ref，事件處理器不必重新綁定
-  const opts = useRef({ canDrop, drop, titleOf, fallback });
-  opts.current = { canDrop, drop, titleOf, fallback };
+  const opts = useRef(options);
+  opts.current = options;
 
   type St = {
     n: number;
@@ -55,7 +58,7 @@ export function useTreeDrag({ canDrop, drop, titleOf, fallback }: Options) {
     x: number;
     y: number;
     active: boolean;
-    over: Over | null;
+    over: T | null;
     ghost: HTMLDivElement | null;
     raf: number;
     handle: HTMLElement;
@@ -85,17 +88,10 @@ export function useTreeDrag({ canDrop, drop, titleOf, fallback }: Options) {
       setOver(null);
     };
 
-    /** 依指標位置找出放置目標 */
     function hitTest() {
       const st = s.current!;
-      const el = document.elementFromPoint(st.x, st.y)?.closest<HTMLElement>("[data-node]");
-      const target = el ? Number(el.dataset.node) : NaN;
-      let next: Over | null = null;
-      if (el && target !== st.n && opts.current.canDrop(st.n, target)) {
-        next = { n: target, position: positionFor(el.getBoundingClientRect(), st.y) };
-      }
-      if (!el) next = opts.current.fallback?.(st.n, st.x, st.y) ?? null;
-      if (next?.n !== st.over?.n || next?.position !== st.over?.position || next?.end !== st.over?.end) {
+      const next = opts.current.hitTest(st.n, st.x, st.y);
+      if (!opts.current.same(next, st.over)) {
         st.over = next;
         setOver(next);
       }
@@ -104,11 +100,25 @@ export function useTreeDrag({ canDrop, drop, titleOf, fallback }: Options) {
     function tick() {
       const st = s.current;
       if (!st?.active) return;
+      let moved = false;
       const v = scrollSpeed(st.y, window.innerHeight);
       if (v) {
         window.scrollBy(0, v);
-        hitTest(); // 內容捲動了，指標下的列也變了
+        moved = true;
       }
+      const box = opts.current.scrollX?.();
+      if (box) {
+        const r = box.getBoundingClientRect();
+        // 只在指標位於容器的高度範圍內才橫向捲
+        if (st.y >= r.top && st.y <= r.bottom) {
+          const h = scrollSpeed(st.x, r.right, r.left);
+          if (h) {
+            box.scrollLeft += h;
+            moved = true;
+          }
+        }
+      }
+      if (moved) hitTest(); // 內容捲動了，指標下的目標也變了
       st.raf = requestAnimationFrame(tick);
     }
 
@@ -144,7 +154,7 @@ export function useTreeDrag({ canDrop, drop, titleOf, fallback }: Options) {
       if (!st || e.pointerId !== st.pointerId) return;
       const { active, over: o, n } = st;
       cleanup();
-      if (active && o) opts.current.drop(n, o.n, o.position);
+      if (active && o !== null) opts.current.drop(n, o);
     }
 
     function onCancel() {
@@ -191,4 +201,28 @@ export function useTreeDrag({ canDrop, drop, titleOf, fallback }: Options) {
   useEffect(() => cleanup, [cleanup]);
 
   return { dragging, over, start };
+}
+
+interface TreeOptions {
+  canDrop: (moving: number, target: number) => boolean;
+  drop: (moving: number, target: number, position: DropPosition) => void;
+  titleOf: (n: number) => string;
+  /** 指標不在任何一列上時的放置目標（例如清單最下方的空白處） */
+  fallback?: (moving: number, x: number, y: number) => Over | null;
+}
+
+/** 任務樹：放在某一列的前或後 */
+export function useTreeDrag({ canDrop, drop, titleOf, fallback }: TreeOptions) {
+  return usePointerDrag<Over>({
+    hitTest: (moving, x, y) => {
+      const el = document.elementFromPoint(x, y)?.closest<HTMLElement>("[data-node]");
+      if (!el) return fallback?.(moving, x, y) ?? null;
+      const target = Number(el.dataset.node);
+      if (target === moving || !canDrop(moving, target)) return null;
+      return { n: target, position: positionFor(el.getBoundingClientRect(), y) };
+    },
+    same: (a, b) => a?.n === b?.n && a?.position === b?.position && a?.end === b?.end,
+    drop: (moving, o) => drop(moving, o.n, o.position),
+    titleOf,
+  });
 }

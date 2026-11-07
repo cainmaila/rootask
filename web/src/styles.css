@@ -393,3 +393,29 @@ section.board-area { min-width: 0; }
 @media (max-width: 600px) {
   .board { grid-auto-columns: 82vw; margin: 0 -16px; padding: 0 16px 8px; scroll-padding: 0 16px; }
 }
+
+/* 看板拖曳（#83、#84）：卡片左側的手把，欄位與卡片的放置標示 */
+.board-card { position: relative; display: flex; align-items: stretch; }
+.board-card .board-card-main { flex: 1; min-width: 0; }
+.board-grip { width: 18px; border-radius: 10px 0 0 10px; }
+.board-card:hover .grip { opacity: 0.7; }
+.board-card.dragging { opacity: 0.4; }
+.board-card.drop-before::before, .board-card.drop-after::after {
+  content: ""; position: absolute; left: 6px; right: 6px; height: 3px; background: var(--accent); border-radius: 2px; pointer-events: none;
+}
+.board-card.drop-before::before { top: -6px; }
+.board-card.drop-after::after { bottom: -6px; }
+.board-card.drop-no { outline: 2px dashed var(--danger); outline-offset: -1px; }
+.board-card.drop-no::after {
+  content: attr(data-hint); position: absolute; left: 10px; bottom: -10px; max-width: calc(100% - 20px);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 12px; line-height: 18px; color: var(--danger); background: var(--surface);
+  border: 1px solid var(--danger); padding: 0 8px; border-radius: 999px; z-index: 2; pointer-events: none;
+}
+.board-col.drop-target { outline: 2px solid var(--accent); outline-offset: -1px; background: var(--sel); }
+.board-col.drop-no { outline: 2px dashed var(--danger); outline-offset: -1px; }
+.board-col.no-drop { opacity: 0.45; }
+.board-hint { color: var(--danger); margin: 8px 4px 0; }
+@media (pointer: coarse) {
+  .board-grip { width: 30px; min-height: 44px; }
+}

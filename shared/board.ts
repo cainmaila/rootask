@@ -66,3 +66,71 @@ export function ancestry(
   }
   return { numbers: chain.slice(-depth), truncated: chain.length > depth };
 }
+
+// ---------- 拖曳（#83、#84） ----------
+
+export type BoardDrop =
+  /** 拖到別欄＝改狀態；ok 為 false 表示轉換規則不允許 */
+  | { kind: "status"; status: string; ok: boolean }
+  /** 同一欄內放在某張卡片前後＝在任務樹中移動；ok 為 false 表示不同父任務（不能互換）或沒有權限 */
+  | { kind: "reorder"; status: string; n: number; position: "before" | "after"; ok: boolean };
+
+export interface BoardCardRef {
+  n: number;
+  statusId: string;
+  /** 畫面上的父任務（null＝最上層） */
+  parent: number | null;
+}
+
+/**
+ * 卡片 moving 放到 status 欄（指標在 card 上的 position 半邊）時要做什麼。
+ * 不能放（原地、沒有目標）回傳 null。
+ */
+export function boardDrop(
+  moving: BoardCardRef,
+  status: string,
+  card: { ref: BoardCardRef; position: "before" | "after" } | null,
+  can: { status: (from: string, to: string) => boolean; reorder: boolean },
+): BoardDrop | null {
+  if (status !== moving.statusId) return { kind: "status", status, ok: can.status(moving.statusId, status) };
+  if (!card || card.ref.n === moving.n) return null;
+  const ok = can.reorder && card.ref.parent === moving.parent;
+  return { kind: "reorder", status, n: card.ref.n, position: card.position, ok };
+}
+
+export function sameDrop(a: BoardDrop | null, b: BoardDrop | null): boolean {
+  if (a === null || b === null) return a === b;
+  if (a.kind !== b.kind || a.status !== b.status || a.ok !== b.ok) return false;
+  return a.kind === "status" || (b.kind === "reorder" && a.n === b.n && a.position === b.position);
+}
+
+/**
+ * 鍵盤：在欄內往上／下移一格，只和同一個父任務的卡片互換（#84）。
+ * column 是這一欄目前顯示的卡片（照任務樹順序）。
+ */
+export function columnNeighbor(
+  column: number[],
+  n: number,
+  dir: -1 | 1,
+  parentOf: (n: number) => number | null,
+): { target: number; position: "before" | "after" } | null {
+  const p = parentOf(n);
+  const sibs = column.filter((k) => k === n || parentOf(k) === p);
+  const i = sibs.indexOf(n);
+  const j = i + dir;
+  if (i < 0 || j < 0 || j >= sibs.length) return null;
+  return { target: sibs[j], position: dir < 0 ? "before" : "after" };
+}
+
+/** 鍵盤：往左／右找下一個轉換規則允許的欄位 */
+export function nextStatus(
+  statusIds: string[],
+  from: string,
+  dir: -1 | 1,
+  allowed: (from: string, to: string) => boolean,
+): string | null {
+  for (let i = statusIds.indexOf(from) + dir; i >= 0 && i < statusIds.length; i += dir) {
+    if (allowed(from, statusIds[i])) return statusIds[i];
+  }
+  return null;
+}

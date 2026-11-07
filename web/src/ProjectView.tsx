@@ -7,13 +7,22 @@ import { isClosing } from "./config";
 import { todayLocal } from "../../shared/meta";
 import { TaskDetail } from "./TaskDetail";
 import { TaskNode, type DragCtx, type TreeView } from "./TaskNode";
-import { Board } from "./Board";
-import { boardColumns, treeOrder } from "../../shared/board";
+import { Board, type BoardDragCtx } from "./Board";
+import { boardColumns, boardDrop, columnNeighbor, nextStatus, sameDrop, treeOrder, type BoardDrop } from "../../shared/board";
+import { transitionAllowed } from "./config";
 import type { ProjectViewName } from "./App";
 import { gh } from "./api";
 import { track } from "./sync";
-import { useTreeDrag, type DropPosition } from "./useTreeDrag";
-import { applyReorder, changedIssues, newlyClosed, reorderAffects, replaceTasks, structureChanges } from "./optimistic";
+import { positionFor, usePointerDrag, useTreeDrag, type DropPosition } from "./useTreeDrag";
+import {
+  applyReorder,
+  changedIssues,
+  newlyClosed,
+  reorderAffects,
+  replaceTasks,
+  structureChanges,
+  withStatus,
+} from "./optimistic";
 import {
   createTask,
   fetchTasks,
@@ -25,6 +34,7 @@ import {
   abilitiesOf,
   neighbor,
   planReorder,
+  setStatus,
   pollEvents,
   pollIssues,
   POLL_PAGE,
@@ -312,6 +322,88 @@ export function ProjectView({
     },
   });
 
+  // ---------- 看板拖曳（#83、#84）；hook 也必須在提早 return 之前 ----------
+  const boardRef = useRef<HTMLDivElement>(null);
+  const boardColsRef = useRef<Map<string, number[]>>(new Map());
+
+  /** 這張任務能不能改成 status（轉換規則，#43） */
+  const statusAllowed = (n: number, status: string) => {
+    const c = ctxRef.current;
+    const t = c?.tree.byNumber.get(n);
+    if (!c || !t) return false;
+    return transitionAllowed(c.cfg.config, statusOf(t, c.cfg.config).id, status, c.permission, c.me);
+  };
+
+  /** 畫面上的父任務（父任務沒載入就當最上層） */
+  const shownParent = (n: number) => {
+    const tree = ctxRef.current?.tree;
+    const p = tree?.byNumber.get(n)?.parent ?? null;
+    return p !== null && tree?.byNumber.has(p) ? p : null;
+  };
+
+  /** 看板改狀態：和任務詳情同一套（樂觀更新、父任務完成數、一次 PATCH） */
+  function changeStatus(n: number, statusId: string) {
+    const c = ctxRef.current;
+    const task = c?.tree.byNumber.get(n);
+    const s = c?.cfg.config.statuses.find((x) => x.id === statusId);
+    if (!c || !task || !s) return;
+    void mutate("改狀態", {
+      tasks: [n],
+      refresh: [n, ...(task.parent !== null ? [task.parent] : [])],
+      optimistic: (t) => withStatus(t, n, s),
+      write: () => setStatus(owner, repo, task, s),
+    }).catch(() => {});
+  }
+
+  const boardDragHook = usePointerDrag<BoardDrop>({
+    hitTest: (moving, x, y) => {
+      const c = ctxRef.current;
+      const task = c?.tree.byNumber.get(moving);
+      if (!c || !task) return null;
+      const el = document.elementFromPoint(x, y);
+      const colEl = el?.closest<HTMLElement>("[data-col]");
+      if (!colEl) return null;
+      const cardEl = el?.closest<HTMLElement>("[data-card]");
+      const ref = (k: number) => ({ n: k, statusId: statusOf(c.tree.byNumber.get(k)!, c.cfg.config).id, parent: shownParent(k) });
+      const card = cardEl
+        ? { ref: ref(Number(cardEl.dataset.card)), position: positionFor(cardEl.getBoundingClientRect(), y) }
+        : null;
+      return boardDrop(ref(moving), colEl.dataset.col!, card, {
+        status: (from, to) => statusAllowed(moving, to) && from !== to,
+        reorder: abilitiesOf(c.permission).edit,
+      });
+    },
+    same: sameDrop,
+    drop: (moving, t) => {
+      if (!t.ok) return;
+      if (t.kind === "status") changeStatus(moving, t.status);
+      else reorder(moving, t.n, t.position);
+    },
+    titleOf: (n) => ctxRef.current?.tree.byNumber.get(n)?.title ?? `#${n}`,
+    scrollX: () => boardRef.current,
+  });
+
+  /** 看板鍵盤：左右換欄、上下在同一個父任務的卡片間移動 */
+  function boardKey(n: number, key: "ArrowLeft" | "ArrowRight" | "ArrowUp" | "ArrowDown") {
+    const c = ctxRef.current;
+    const task = c?.tree.byNumber.get(n);
+    if (!c || !task) return;
+    const from = statusOf(task, c.cfg.config).id;
+    if (key === "ArrowLeft" || key === "ArrowRight") {
+      const to = nextStatus(
+        c.cfg.config.statuses.map((x) => x.id),
+        from,
+        key === "ArrowLeft" ? -1 : 1,
+        (_f, t) => statusAllowed(n, t),
+      );
+      if (to) changeStatus(n, to);
+      return;
+    }
+    if (!abilitiesOf(c.permission).edit) return;
+    const nb = columnNeighbor(boardColsRef.current.get(from) ?? [], n, key === "ArrowUp" ? -1 : 1, shownParent);
+    if (nb) reorder(n, nb.target, nb.position);
+  }
+
   useEffect(() => {
     void reload();
     // 回到畫面時全部重新讀取
@@ -482,7 +574,16 @@ export function ProjectView({
       { leavesOnly, only: result ? result.matches : null },
     );
   }
-  const boardCols = boardColumnsNow;
+  const boardColsNow = viewName === "board" ? boardColumnsNow() : new Map<string, number[]>();
+  boardColsRef.current = boardColsNow;
+  const boardDrag: BoardDragCtx = {
+    dragging: boardDragHook.dragging,
+    over: boardDragHook.over,
+    start: boardDragHook.start,
+    key: boardKey,
+    allowed: statusAllowed,
+    enabled: can.triage,
+  };
 
   async function addRoot() {
     const title = newTitle.trim();
@@ -623,7 +724,14 @@ export function ProjectView({
                     </span>
                   )}
                 </div>
-                <Board ctx={full} columns={boardCols()} selected={selected} select={setSelected} />
+                <Board
+                  ctx={full}
+                  columns={boardColsNow}
+                  selected={selected}
+                  select={setSelected}
+                  drag={boardDrag}
+                  boardRef={boardRef}
+                />
               </>
             ) : (
               <>
