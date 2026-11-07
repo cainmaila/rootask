@@ -455,7 +455,12 @@ export function editComment(owner: string, repo: string, id: number, body: strin
 }
 
 export async function deleteComment(owner: string, repo: string, id: number): Promise<void> {
-  await gh(`/repos/${owner}/${repo}/issues/comments/${id}`, { method: "DELETE" });
+  try {
+    await gh(`/repos/${owner}/${repo}/issues/comments/${id}`, { method: "DELETE" });
+  } catch (e) {
+    // 已經被別人刪掉了：要的結果一樣，不算失敗（#80）
+    if (!(e instanceof ApiError && e.status === 404)) throw e;
+  }
 }
 
 export async function listAssignable(owner: string, repo: string): Promise<Person[]> {

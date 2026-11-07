@@ -189,4 +189,31 @@ test.describe("多人同步", () => {
     await page.waitForTimeout(500);
     expect((await serverIssue(page, 13)).title).toBe("按 Enter 存的標題");
   });
+
+  test("#79 同事設了截止日、我改開始日，截止日不會被清掉", async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem("rootask:poll-ms", "600000"));
+    await openProject(page);
+    await other(page).patch(13, { body: '<!-- rootask:meta {"due":"2030-12-31"} -->' });
+    await row(page, "整理專案文件").locator(".node-title").click();
+    await page.locator("aside.detail").getByLabel("開始").fill("2030-12-01");
+    await expect(page.getByText("✓ 已同步")).toBeVisible();
+    const body = (await serverIssue(page, 13)).body;
+    expect(body).toContain('"start":"2030-12-01"');
+    expect(body).toContain('"due":"2030-12-31"');
+  });
+
+  test("#76 中文輸入法選字中按 Enter／Esc 不算存檔或取消", async ({ page }) => {
+    await openProject(page);
+    await row(page, "整理專案文件").locator(".node-title").click();
+    const title = page.locator("aside.detail .title-input");
+    await title.fill("整理專案文件ㄓㄨㄥ");
+    // 模擬輸入法組字中的按鍵（瀏覽器送出的 keydown 帶 isComposing）
+    for (const key of ["Enter", "Escape"]) {
+      await title.evaluate((el, k) => el.dispatchEvent(new KeyboardEvent("keydown", { key: k, isComposing: true, bubbles: true })), key);
+    }
+    await expect(title).toBeFocused();
+    await expect(title).toHaveValue("整理專案文件ㄓㄨㄥ");
+    await page.waitForTimeout(500);
+    expect((await serverIssue(page, 13)).title).toBe("整理專案文件");
+  });
 });

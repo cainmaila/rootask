@@ -15,12 +15,14 @@ interface Props {
   onEdit: (body: string) => Promise<boolean>;
   onDelete: () => Promise<boolean>;
   onError: (msg: string) => void;
+  /** 編輯中的內容（null＝沒在編輯）：留言被別人刪掉時，TaskDetail 用它保住打好的字（#80） */
+  onDraft: (text: string | null) => void;
 }
 
 const fmt = (iso: string) => new Date(iso).toLocaleString("zh-TW");
 
 /** 一則留言：顯示、編輯、刪除（#50）。刪除前在原地確認，不用瀏覽器的確認對話框 */
-export function CommentItem({ c, owner, repo, issue, thresholdMb, canManage, onEdit, onDelete, onError }: Props) {
+export function CommentItem({ c, owner, repo, issue, thresholdMb, canManage, onEdit, onDelete, onError, onDraft }: Props) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(c.body);
   const [confirming, setConfirming] = useState(false);
@@ -29,6 +31,8 @@ export function CommentItem({ c, owner, repo, issue, thresholdMb, canManage, onE
   // 開始編輯時的內容：沒改就不寫回，免得把別人剛改的蓋掉（#72）
   const base = useRef(c.body);
   const edited = !!c.updated_at && c.updated_at !== c.created_at;
+  // 卸載時不清掉：留言被刪掉而卸載時，TaskDetail 還要拿得到最後的內容
+  useEffect(() => onDraft(editing ? draft : null), [editing, draft]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 沒存到後按頂端列的「重試」存好了：關掉編輯框
   useEffect(() => {
@@ -59,7 +63,7 @@ export function CommentItem({ c, owner, repo, issue, thresholdMb, canManage, onE
       <div className="comment-head">
         {c.user && <img className="avatar" src={c.user.avatar_url} alt="" />}
         <b>{c.user?.login ?? "已刪除的使用者"}</b>
-        <span className="muted small" title={edited ? `編輯於 ${fmt(c.updated_at!)}` : undefined}>
+        <span className="muted small comment-time" title={edited ? `編輯於 ${fmt(c.updated_at!)}` : undefined}>
           {fmt(c.created_at)}
           {edited && "（已編輯）"}
         </span>
@@ -99,7 +103,17 @@ export function CommentItem({ c, owner, repo, issue, thresholdMb, canManage, onE
         </div>
       )}
       {editing ? (
-        <div className="comment-edit">
+        <div
+          className="comment-edit"
+          onKeyDown={(e) => {
+            // Esc 取消編輯（中文輸入法選字中的 Esc 不算）
+            if (e.key === "Escape" && !e.nativeEvent.isComposing && e.keyCode !== 229) {
+              setEditing(false);
+              setFailed(false);
+              setDraft(c.body);
+            }
+          }}
+        >
           {failed && <p className="error small">留言沒有存到，內容還在編輯框裡，可以再按一次儲存。</p>}
           <AttachTextarea
             owner={owner}

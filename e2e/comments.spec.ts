@@ -91,4 +91,64 @@ test.describe("留言編輯、刪除", () => {
     await expect(page.getByRole("alert")).toContainText("刪除留言");
     await expect(comment(page, "收到，我週五前回覆")).toBeVisible();
   });
+
+  // ---------- QA 回報（#80、#81） ----------
+  const cainComment = async (page: Page) => {
+    const st = await (await page.request.get("/__state")).json();
+    const i = (st.repos["demo/website"].issues as { title: string; comments: { id: number; body: string }[] }[]).find(
+      (x) => x.title === "首頁設計",
+    )!;
+    return i.comments.find((c) => c.body.startsWith("收到"))!.id;
+  };
+
+  test("#80 正在編輯的留言被同事刪掉：打好的字保住，可以放到新留言", async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem("rootask:poll-ms", "400"));
+    const panel = await openDesign(page);
+    const mine = page.locator("aside.detail .comments > li").nth(1);
+    await mine.getByRole("button", { name: "編輯" }).click();
+    await mine.locator("textarea").fill("打到一半的修改");
+    await page.request.delete(`/api/gh/repos/demo/website/issues/comments/${await cainComment(page)}`);
+    const orphan = panel.locator(".orphan-draft");
+    await expect(orphan).toContainText("已經被別人刪除", { timeout: 5000 });
+    await expect(orphan).toContainText("打到一半的修改");
+    await orphan.getByRole("button", { name: "放到新留言" }).click();
+    await expect(panel.getByPlaceholder(/寫下留言/)).toHaveValue("打到一半的修改");
+    await expect(orphan).toHaveCount(0);
+  });
+
+  test("#80 檢查之前就按儲存：不顯示 Not Found，打好的字一樣保住", async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem("rootask:poll-ms", "600000"));
+    const panel = await openDesign(page);
+    const mine = page.locator("aside.detail .comments > li").nth(1);
+    await mine.getByRole("button", { name: "編輯" }).click();
+    await mine.locator("textarea").fill("存不進去的修改");
+    await page.request.delete(`/api/gh/repos/demo/website/issues/comments/${await cainComment(page)}`);
+    await mine.getByRole("button", { name: "儲存" }).click();
+    await expect(panel.locator(".orphan-draft")).toContainText("存不進去的修改");
+    await expect(page.getByRole("alert")).toHaveCount(0);
+  });
+
+  test("#80 刪除同事已經刪掉的留言：不算失敗", async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem("rootask:poll-ms", "600000"));
+    await openDesign(page);
+    const mine = page.locator("aside.detail .comments > li").nth(1);
+    await page.request.delete(`/api/gh/repos/demo/website/issues/comments/${await cainComment(page)}`);
+    await mine.getByRole("button", { name: "刪除" }).click();
+    await mine.getByRole("button", { name: "確定刪除" }).click();
+    await expect(comment(page, "收到，我週五前回覆")).toHaveCount(0);
+    await expect(page.getByText("✓ 已同步")).toBeVisible();
+    await expect(page.getByRole("alert")).toHaveCount(0);
+  });
+
+  test("#81 留言時間與（已編輯）不被拆成好幾行", async ({ page }) => {
+    await openDesign(page);
+    const mine = page.locator("aside.detail .comments > li").nth(1);
+    await mine.getByRole("button", { name: "編輯" }).click();
+    await mine.locator("textarea").fill("改一下");
+    await mine.getByRole("button", { name: "儲存" }).click();
+    const time = comment(page, "改一下").locator(".comment-time");
+    await expect(time).toContainText("（已編輯）");
+    const lineHeight = await time.evaluate((e) => parseFloat(getComputedStyle(e).lineHeight) || 18);
+    expect((await time.boundingBox())!.height).toBeLessThan(lineHeight * 1.5);
+  });
 });

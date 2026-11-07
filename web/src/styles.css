@@ -177,7 +177,7 @@ textarea { resize: vertical; }
 }
 .person.on { background: var(--sel); border-color: var(--accent); }
 .comments { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
-.comment-head { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.comment-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; font-size: 13px; }
 .comment-body { padding: 4px 0 0 26px; overflow-wrap: anywhere; }
 .comment-form { display: grid; gap: 8px; justify-items: end; }
 
@@ -359,3 +359,7 @@ section.tree { min-width: 0; }
 .comment-confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 4px 0 6px; padding: 8px 10px;
   border: 1px solid var(--danger); border-radius: 10px; }
 .comment-edit { margin-top: 4px; }
+/* 留言時間不拆行（#81）；被刪掉的留言草稿（#80） */
+.comment-time { white-space: nowrap; }
+.orphan-draft { margin: 8px 0; padding: 10px 12px; border: 1px dashed var(--line); border-radius: 10px; background: var(--surface); }
+.orphan-text { max-height: 160px; overflow: auto; margin: 6px 0 8px; }

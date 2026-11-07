@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { isClosing, transitionAllowed } from "./config";
-import { isOverdue, metaError, todayLocal, type TaskMeta } from "../../shared/meta";
+import { isOverdue, mergeMeta, metaError, todayLocal, type TaskMeta } from "../../shared/meta";
 import type { Mutation, ProjectCtx } from "./ProjectView";
 import { patchTask, reparent, withStatus } from "./optimistic";
 import { AttachTextarea } from "./AttachTextarea";
 import { Markdown } from "./Markdown";
 import { CommentItem } from "./CommentItem";
 import { dismissSyncError, track, useSync } from "./sync";
+import { ApiError } from "./api";
 import {
   abilitiesOf,
   actualTimes,
@@ -62,6 +63,20 @@ export function TaskDetail({ n, ctx, close, full = false, expand, open }: Props)
   const [body, setBody] = useState(() => failedDrafts.get(draftKey) ?? task.body ?? "");
   const [editingBody, setEditingBody] = useState(() => failedDrafts.has(draftKey));
   const [comments, setComments] = useState<Comment[] | null>(null);
+  // 編輯中的留言內容；留言被別人刪掉時保住打好的字（#80）
+  const commentDrafts = useRef(new Map<number, string>());
+  const [orphans, setOrphans] = useState<string[]>([]);
+  useEffect(() => {
+    if (!comments) return;
+    const ids = new Set(comments.map((c) => c.id));
+    const lost: string[] = [];
+    for (const [id, text] of commentDrafts.current) {
+      if (ids.has(id)) continue;
+      commentDrafts.current.delete(id);
+      if (text.trim()) lost.push(text);
+    }
+    if (lost.length) setOrphans((o) => [...o, ...lost]);
+  }, [comments]);
   const [draft, setDraft] = useState("");
   const [uploading, setUploading] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -131,10 +146,17 @@ export function TaskDetail({ n, ctx, close, full = false, expand, open }: Props)
       setErr(e);
       return;
     }
-    if (next.start === task.meta.start && next.due === task.meta.due) return;
+    // 只送有變的那一個日期：另一個以 GitHub 上最新的為準，不會把同事剛設的清掉（#79）
+    const patch: Partial<TaskMeta> = {};
+    if (next.start !== task.meta.start) patch.start = next.start;
+    if (next.due !== task.meta.due) patch.due = next.due;
+    if (Object.keys(patch).length === 0) return;
     void run("更新日期", {
-      optimistic: (t) => patchTask(t, n, { meta: { ...task.meta, start: next.start, due: next.due } }),
-      write: () => updateBody(owner, repo, n, { meta: { start: next.start, due: next.due } }),
+      optimistic: (t) => {
+        const cur = t.byNumber.get(n);
+        return cur ? patchTask(t, n, { meta: mergeMeta(cur.meta, patch) }) : t;
+      },
+      write: () => updateBody(owner, repo, n, { meta: patch }),
     });
   }
   const overdue = !isClosing(status.category) && isOverdue(meta.due, todayLocal());
@@ -256,7 +278,8 @@ export function TaskDetail({ n, ctx, close, full = false, expand, open }: Props)
       onFocus={() => (titleBase.current = task.title)}
       onChange={(e) => setTitle(e.target.value)}
       onKeyDown={(e) => {
-        // Enter 存、Esc 取消（#76）
+        // Enter 存、Esc 取消（#76）。中文輸入法選字中的 Enter／Esc 是給輸入法的，不算
+        if (e.nativeEvent.isComposing || e.keyCode === 229) return;
         if (e.key === "Enter") e.currentTarget.blur();
         if (e.key === "Escape") {
           titleCancel.current = true;
@@ -510,7 +533,9 @@ export function TaskDetail({ n, ctx, close, full = false, expand, open }: Props)
       try {
         await track(label, write, [n], { retry: () => void attempt() });
         return true;
-      } catch {
+      } catch (e) {
+        // 留言已被別人刪掉：不顯示「Not Found」，改由下面的提示保住打好的字（#80）
+        if (e instanceof ApiError && e.status === 404) dismissSyncError(`${label}|${n}`);
         setComments((cs) => cs && revert(cs));
         listComments(owner, repo, n).then(setComments, () => {});
         return false;
@@ -534,6 +559,10 @@ export function TaskDetail({ n, ctx, close, full = false, expand, open }: Props)
             thresholdMb={threshold}
             canManage={c.user?.login === ctx.me || isManager}
             onError={setErr}
+            onDraft={(text) => {
+              if (text === null) commentDrafts.current.delete(c.id);
+              else commentDrafts.current.set(c.id, text);
+            }}
             onEdit={(body) =>
               commentOp(
                 "編輯留言",
@@ -553,6 +582,28 @@ export function TaskDetail({ n, ctx, close, full = false, expand, open }: Props)
           />
         ))}
       </ul>
+      {orphans.map((text, i) => (
+        <div className="orphan-draft" role="status" key={i}>
+          <p className="small">你正在編輯的留言已經被別人刪除，打好的內容還在：</p>
+          <div className="orphan-text">
+            <Markdown text={text} />
+          </div>
+          <span className="row-gap">
+            <button
+              className="btn small primary"
+              onClick={() => {
+                setDraft((d) => (d.trim() ? `${d}\n\n${text}` : text));
+                setOrphans((o) => o.filter((_, j) => j !== i));
+              }}
+            >
+              放到新留言
+            </button>
+            <button className="btn small" onClick={() => setOrphans((o) => o.filter((_, j) => j !== i))}>
+              捨棄
+            </button>
+          </span>
+        </div>
+      ))}
       <form
         className="comment-form"
         onSubmit={(e) => {
