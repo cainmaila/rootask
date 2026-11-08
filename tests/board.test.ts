@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ancestry, boardColumns, boardDrop, columnNeighbor, nextStatus, sameDrop, treeOrder, type BoardItem } from "../shared/board";
+import { ancestry, boardColumns, boardDrop, columnNeighbor, neighborStatus, sameDrop, treeOrder, type BoardItem } from "../shared/board";
 
 // 1 ─ 4 ─ 6
 //   └ 5
@@ -91,8 +91,12 @@ describe("看板拖曳（#83、#84）", () => {
     expect(boardDrop(mv, "todo", { ref: sib, position: "after" }, can)).toEqual({
       kind: "reorder", status: "todo", n: 9, position: "after", ok: true,
     });
-    expect(boardDrop(mv, "todo", { ref: other, position: "after" }, can)?.ok).toBe(false);
-    expect(boardDrop(mv, "todo", { ref: sib, position: "after" }, { status: all, reorder: false })?.ok).toBe(false);
+    expect(boardDrop(mv, "todo", { ref: other, position: "after" }, can)).toMatchObject({ ok: false, reason: "parent" });
+    // #89：沒有權限時說是權限，不是父任務
+    expect(boardDrop(mv, "todo", { ref: sib, position: "after" }, { status: all, reorder: false })).toMatchObject({
+      ok: false,
+      reason: "permission",
+    });
     expect(boardDrop(mv, "todo", null, can)).toBeNull();
     expect(boardDrop(mv, "todo", { ref: mv, position: "after" }, can)).toBeNull();
   });
@@ -115,11 +119,11 @@ describe("看板拖曳（#83、#84）", () => {
     expect(columnNeighbor(column, 6, 1, parentOf)).toBeNull();
   });
 
-  it("鍵盤左右：跳到下一個允許的欄位", () => {
+  it("鍵盤左右：只移到隔壁欄，不允許就擋下（#93）", () => {
     const ids = ["todo", "doing", "review", "done"];
-    expect(nextStatus(ids, "todo", 1, all)).toBe("doing");
-    expect(nextStatus(ids, "todo", 1, (_f, t) => t !== "doing")).toBe("review");
-    expect(nextStatus(ids, "todo", -1, all)).toBeNull();
-    expect(nextStatus(ids, "done", 1, all)).toBeNull();
+    expect(neighborStatus(ids, "todo", 1, all)).toEqual({ to: "doing", blocked: false });
+    expect(neighborStatus(ids, "todo", 1, (_f, t) => t !== "doing")).toEqual({ to: "doing", blocked: true });
+    expect(neighborStatus(ids, "todo", -1, all)).toBeNull();
+    expect(neighborStatus(ids, "done", 1, all)).toBeNull();
   });
 });

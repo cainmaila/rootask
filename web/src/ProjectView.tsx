@@ -8,7 +8,7 @@ import { todayLocal } from "../../shared/meta";
 import { TaskDetail } from "./TaskDetail";
 import { TaskNode, type DragCtx, type TreeView } from "./TaskNode";
 import { Board, type BoardDragCtx } from "./Board";
-import { boardColumns, boardDrop, columnNeighbor, nextStatus, sameDrop, treeOrder, type BoardDrop } from "../../shared/board";
+import { boardColumns, boardDrop, columnNeighbor, neighborStatus, sameDrop, treeOrder, type BoardDrop } from "../../shared/board";
 import { transitionAllowed } from "./config";
 import type { ProjectViewName } from "./App";
 import { gh } from "./api";
@@ -118,6 +118,25 @@ const projectHash = (owner: string, repo: string, view: ProjectViewName = "tree"
   `#/p/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}${view === "board" ? "/board" : ""}`;
 const taskHash = (owner: string, repo: string, n: number, view: ProjectViewName = "tree") =>
   `${projectHash(owner, repo, view)}/t/${n}`;
+
+// 打開整頁任務前記下捲動位置，回來時還原（#91）
+const scrollKey = (owner: string, repo: string) => `rootask:scroll:${owner}/${repo}`;
+function saveScroll(owner: string, repo: string, board: HTMLElement | null) {
+  try {
+    sessionStorage.setItem(scrollKey(owner, repo), JSON.stringify({ y: window.scrollY, x: board?.scrollLeft ?? 0 }));
+  } catch {
+    /* 存不了就不還原 */
+  }
+}
+function takeScroll(owner: string, repo: string): { x: number; y: number } | null {
+  try {
+    const v = sessionStorage.getItem(scrollKey(owner, repo));
+    sessionStorage.removeItem(scrollKey(owner, repo));
+    return v ? JSON.parse(v) : null;
+  } catch {
+    return null;
+  }
+}
 
 // 看板「只看最底層任務」是每位使用者自己的偏好（#82）
 const leavesKey = (owner: string, repo: string) => `rootask:board-leaves:${owner}/${repo}`;
@@ -324,6 +343,12 @@ export function ProjectView({
 
   // ---------- 看板拖曳（#83、#84）；hook 也必須在提早 return 之前 ----------
   const boardRef = useRef<HTMLDivElement>(null);
+  const [keyNotice, setKeyNotice] = useState<{ n: number; text: string } | null>(null);
+  useEffect(() => {
+    if (!keyNotice) return;
+    const t = setTimeout(() => setKeyNotice(null), 3000);
+    return () => clearTimeout(t);
+  }, [keyNotice]);
   const boardColsRef = useRef<Map<string, number[]>>(new Map());
 
   /** 這張任務能不能改成 status（轉換規則，#43） */
@@ -390,19 +415,38 @@ export function ProjectView({
     if (!c || !task) return;
     const from = statusOf(task, c.cfg.config).id;
     if (key === "ArrowLeft" || key === "ArrowRight") {
-      const to = nextStatus(
+      const r = neighborStatus(
         c.cfg.config.statuses.map((x) => x.id),
         from,
         key === "ArrowLeft" ? -1 : 1,
         (_f, t) => statusAllowed(n, t),
       );
-      if (to) changeStatus(n, to);
+      if (!r) return;
+      if (r.blocked) {
+        // 只移一格；隔壁不允許就不動，在卡片上說明（#93）
+        const name = c.cfg.config.statuses.find((x) => x.id === r.to)?.name ?? r.to;
+        setKeyNotice({ n, text: `轉換規則不允許改成「${name}」` });
+        return;
+      }
+      setKeyNotice(null);
+      changeStatus(n, r.to);
       return;
     }
     if (!abilitiesOf(c.permission).edit) return;
     const nb = columnNeighbor(boardColsRef.current.get(from) ?? [], n, key === "ArrowUp" ? -1 : 1, shownParent);
     if (nb) reorder(n, nb.target, nb.position);
   }
+
+  // 從整頁任務回來時，還原清單／看板的捲動位置（#91）
+  useEffect(() => {
+    if (fullTask !== null || !ctx) return;
+    const saved = takeScroll(owner, repo);
+    if (!saved) return;
+    requestAnimationFrame(() => {
+      window.scrollTo(0, saved.y);
+      if (boardRef.current) boardRef.current.scrollLeft = saved.x;
+    });
+  }, [fullTask, viewName, !!ctx]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     void reload();
@@ -493,7 +537,9 @@ export function ProjectView({
           ctx={full}
           full
           close={() => {
-            setSelected(fullTask);
+            // 桌面回去時把剛看的任務選起來；手機上詳情是抽屜，打開會蓋住清單（#91）
+            if (window.matchMedia("(min-width: 900px)").matches) setSelected(fullTask);
+            else setSelected(null);
             location.hash = projectHash(owner, repo, viewName);
           }}
           open={(n) => (location.hash = taskHash(owner, repo, n, viewName))}
@@ -583,6 +629,8 @@ export function ProjectView({
     key: boardKey,
     allowed: statusAllowed,
     enabled: can.triage,
+    canReorder: can.edit,
+    notice: keyNotice,
   };
 
   async function addRoot() {
@@ -715,6 +763,14 @@ export function ProjectView({
                     />
                     只看最底層任務
                   </label>
+                  {filtering && !showDone && ctx.tree.closedCount > 0 && (
+                    <span className="muted small filter-hint">
+                      已完成的任務沒有列入搜尋。
+                      <button className="link-btn" onClick={() => void toggleShowDone()}>
+                        顯示已完成
+                      </button>
+                    </span>
+                  )}
                   {filtering && result && result.matches.size === 0 && (
                     <span className="muted small">
                       沒有符合的任務。
@@ -731,6 +787,7 @@ export function ProjectView({
                   select={setSelected}
                   drag={boardDrag}
                   boardRef={boardRef}
+                  done={{ showDone, closedCount: ctx.tree.closedCount, onShowDone: () => void toggleShowDone() }}
                 />
               </>
             ) : (
@@ -790,7 +847,10 @@ export function ProjectView({
               n={selected}
               ctx={full}
               close={() => setSelected(null)}
-              expand={() => (location.hash = taskHash(owner, repo, selected, viewName))}
+              expand={() => {
+                saveScroll(owner, repo, boardRef.current);
+                location.hash = taskHash(owner, repo, selected, viewName);
+              }}
             />
           )}
         </div>

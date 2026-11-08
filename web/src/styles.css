@@ -369,7 +369,7 @@ section.board-area { min-width: 0; }
 .board-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 8px; }
 .board {
   display: grid; grid-auto-flow: column; grid-auto-columns: minmax(240px, 1fr); gap: 10px;
-  overflow-x: auto; padding-bottom: 8px; align-items: start;
+  overflow-x: auto; padding-bottom: 8px; align-items: stretch;
   scroll-snap-type: x proximity; overscroll-behavior-x: contain;
 }
 .board-col {
@@ -418,4 +418,12 @@ section.board-area { min-width: 0; }
 .board-hint { color: var(--danger); margin: 8px 4px 0; }
 @media (pointer: coarse) {
   .board-grip { width: 30px; min-height: 44px; }
+}
+/* 拖曳中關掉 scroll-snap，不然自動捲動會被吸回原位（#87）；欄位等高，短欄下方的空白也能放（#92） */
+.board.dragging { scroll-snap-type: none; }
+@media (max-width: 600px) { .board-col { min-height: 50vh; } }
+.board-key-hint {
+  position: absolute; left: 10px; bottom: -10px; max-width: calc(100% - 20px); z-index: 2;
+  font-size: 12px; line-height: 18px; color: var(--danger); background: var(--surface);
+  border: 1px solid var(--danger); padding: 0 8px; border-radius: 999px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }

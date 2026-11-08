@@ -73,7 +73,15 @@ export type BoardDrop =
   /** 拖到別欄＝改狀態；ok 為 false 表示轉換規則不允許 */
   | { kind: "status"; status: string; ok: boolean }
   /** 同一欄內放在某張卡片前後＝在任務樹中移動；ok 為 false 表示不同父任務（不能互換）或沒有權限 */
-  | { kind: "reorder"; status: string; n: number; position: "before" | "after"; ok: boolean };
+  | {
+      kind: "reorder";
+      status: string;
+      n: number;
+      position: "before" | "after";
+      ok: boolean;
+      /** 不能放的原因：不同父任務，或沒有調整順序的權限（#89） */
+      reason?: "parent" | "permission";
+    };
 
 export interface BoardCardRef {
   n: number;
@@ -94,14 +102,16 @@ export function boardDrop(
 ): BoardDrop | null {
   if (status !== moving.statusId) return { kind: "status", status, ok: can.status(moving.statusId, status) };
   if (!card || card.ref.n === moving.n) return null;
-  const ok = can.reorder && card.ref.parent === moving.parent;
-  return { kind: "reorder", status, n: card.ref.n, position: card.position, ok };
+  const base = { kind: "reorder" as const, status, n: card.ref.n, position: card.position };
+  if (!can.reorder) return { ...base, ok: false, reason: "permission" };
+  if (card.ref.parent !== moving.parent) return { ...base, ok: false, reason: "parent" };
+  return { ...base, ok: true };
 }
 
 export function sameDrop(a: BoardDrop | null, b: BoardDrop | null): boolean {
   if (a === null || b === null) return a === b;
   if (a.kind !== b.kind || a.status !== b.status || a.ok !== b.ok) return false;
-  return a.kind === "status" || (b.kind === "reorder" && a.n === b.n && a.position === b.position);
+  return a.kind === "status" || (b.kind === "reorder" && a.n === b.n && a.position === b.position && a.reason === b.reason);
 }
 
 /**
@@ -122,15 +132,17 @@ export function columnNeighbor(
   return { target: sibs[j], position: dir < 0 ? "before" : "after" };
 }
 
-/** 鍵盤：往左／右找下一個轉換規則允許的欄位 */
-export function nextStatus(
+/**
+ * 鍵盤：往左／右只移到隔壁欄（Cain 決定 B，#93）。
+ * 隔壁不允許時回傳 blocked，畫面提示原因、不動；沒有隔壁回傳 null。
+ */
+export function neighborStatus(
   statusIds: string[],
   from: string,
   dir: -1 | 1,
   allowed: (from: string, to: string) => boolean,
-): string | null {
-  for (let i = statusIds.indexOf(from) + dir; i >= 0 && i < statusIds.length; i += dir) {
-    if (allowed(from, statusIds[i])) return statusIds[i];
-  }
-  return null;
+): { to: string; blocked: boolean } | null {
+  const to = statusIds[statusIds.indexOf(from) + dir];
+  if (to === undefined) return null;
+  return { to, blocked: !allowed(from, to) };
 }

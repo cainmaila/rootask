@@ -66,7 +66,7 @@ test("完成欄照「隱藏已完成」設定；改成完成的卡片照 #63 留
   await page.locator("aside.detail").getByLabel("狀態", { exact: true }).selectOption("done");
   await expect.poll(() => cards(page, "完成")).toEqual(["上傳圖片 API"]);
   await page.locator("aside.detail").getByRole("button", { name: "關閉" }).click(); // 手機上面板會蓋住篩選列
-  await page.getByText(/顯示已完成/).click();
+  await page.getByRole("checkbox", { name: /顯示已完成/ }).click();
   await expect.poll(async () => (await cards(page, "完成")).length).toBeGreaterThan(1);
 });
 
@@ -218,4 +218,97 @@ test("#83 手機：用手把觸控拖到別欄", async ({ page, isMobile }) => {
   const vw = page.viewportSize()!.width;
   await touchDrag(page, g, { x: vw - 20, y: g.y + 40 }, 30);
   await expect.poll(async () => (await serverIssue(page, "Hero 主視覺")).labels, { timeout: 5000 }).toContain("status:doing");
+});
+
+// ---------- QA 回報（#87～#93） ----------
+test.describe("看板：QA 回報", () => {
+  test("#87 拖到看板右緣會橫向自動捲動", async ({ page }) => {
+    await page.setViewportSize({ width: 820, height: 700 });
+    await openBoard(page);
+    const board = page.locator(".board");
+    expect(await board.evaluate((e) => e.scrollWidth > e.clientWidth)).toBe(true);
+    const bb = (await board.boundingBox())!;
+    await mouseDrag(page, "Hero 主視覺", { x: bb.x + bb.width - 8, y: bb.y + 120 }, false);
+    await page.waitForTimeout(1200);
+    expect(await board.evaluate((e) => e.scrollLeft)).toBeGreaterThan(100);
+    await page.keyboard.press("Escape");
+    await page.mouse.up();
+  });
+
+  test("#88 鍵盤左右換欄後焦點還在手把，可以連按", async ({ page, isMobile }) => {
+    test.skip(!!isMobile, "只在桌面");
+    await openBoard(page);
+    await card(page, "上傳圖片 API").locator(".grip").focus();
+    await page.keyboard.press("ArrowRight");
+    await expect.poll(() => cards(page, "進行中")).toContain("上傳圖片 API");
+    await expect(card(page, "上傳圖片 API").locator(".grip")).toBeFocused();
+    await expect(card(page, "上傳圖片 API")).not.toHaveClass(/syncing/);
+    await page.keyboard.press("ArrowRight");
+    await expect.poll(() => cards(page, "待審核")).toContain("上傳圖片 API");
+    await expect(card(page, "上傳圖片 API").locator(".grip")).toBeFocused();
+  });
+
+  test("#89 triage 在欄內拖曳時，提示說的是權限", async ({ page, isMobile }) => {
+    test.skip(!!isMobile, "只在桌面");
+    await page.request.post("/__as?login=amy&role=triage");
+    await openBoard(page);
+    const target = (await card(page, "文章列表 API").boundingBox())!;
+    await mouseDrag(page, "上傳圖片 API", { x: target.x + target.width / 2, y: target.y + 6 }, false);
+    await expect(card(page, "文章列表 API")).toHaveAttribute("data-hint", "你沒有調整順序的權限，只能換欄");
+    await page.mouse.up();
+    await expect(card(page, "上傳圖片 API").locator(".grip")).toHaveAttribute("aria-label", /換欄（改狀態），也可以用左右鍵/);
+  });
+
+  test("#90 隱藏已完成時，完成欄說明並可以直接顯示；搜尋時也提醒", async ({ page }) => {
+    await openBoard(page);
+    const doneCol = col(page, "完成");
+    await expect(doneCol).toContainText("已完成的任務被隱藏了");
+    await page.getByLabel("搜尋任務").fill("字體");
+    await expect(page.locator(".board-tools")).toContainText("已完成的任務沒有列入搜尋");
+    await page.getByLabel("搜尋任務").fill("");
+    await doneCol.getByRole("button", { name: "顯示已完成" }).click();
+    await expect.poll(async () => (await cards(page, "完成")).length).toBeGreaterThan(0);
+  });
+
+  test("#91 手機：從整頁任務回到看板，不會蓋上詳情抽屜，捲動位置還在", async ({ page, isMobile }) => {
+    test.skip(!isMobile, "只在手機");
+    await openBoard(page);
+    await page.locator(".board").evaluate((e) => (e.scrollLeft = 300));
+    await card(page, "官網改版").locator(".board-card-main").tap();
+    await page.locator("aside.detail").getByRole("button", { name: "展開成整頁" }).tap();
+    await expect(page).toHaveURL(/\/board\/t\/\d+$/);
+    await page.getByRole("button", { name: "回到任務列表" }).tap();
+    await expect(page.locator(".board-card").first()).toBeVisible();
+    await expect(page.locator("aside.detail")).toHaveCount(0);
+    await expect.poll(() => page.locator(".board").evaluate((e) => e.scrollLeft)).toBeGreaterThan(200);
+  });
+
+  test("#92 拖到較短欄位下方的空白處也能換欄", async ({ page, isMobile }) => {
+    test.skip(!!isMobile, "只在桌面");
+    await openBoard(page);
+    const c = (await col(page, "待審核").boundingBox())!;
+    const lastCard = (await col(page, "待審核").locator(".board-card").last().boundingBox())!;
+    // 「待審核」只有一張卡，欄位和最長的欄一樣高；放在卡片下方很遠的空白處
+    expect(c.y + c.height).toBeGreaterThan(lastCard.y + lastCard.height + 150);
+    // 放在卡片下方的空白（畫面範圍內）
+    const vh = page.viewportSize()!.height;
+    const y = Math.min(c.y + c.height - 30, vh - 40);
+    expect(y).toBeGreaterThan(lastCard.y + lastCard.height + 60);
+    await mouseDrag(page, "上傳圖片 API", { x: c.x + c.width / 2, y });
+    await expect.poll(() => cards(page, "待審核")).toContain("上傳圖片 API");
+  });
+
+  test("#93 鍵盤只移到隔壁欄；隔壁不允許就不動並說明", async ({ page, isMobile }) => {
+    test.skip(!!isMobile, "只在桌面");
+    await page.request.post("/__as?login=amy&role=write");
+    await openBoard(page);
+    await card(page, "導覽列互動").locator(".grip").focus();
+    await page.keyboard.press("ArrowRight");
+    await expect(card(page, "導覽列互動").getByRole("status")).toHaveText("轉換規則不允許改成「完成」");
+    await page.waitForTimeout(400);
+    expect(await cards(page, "待審核")).toContain("導覽列互動");
+    expect(await cards(page, "放棄")).not.toContain("導覽列互動");
+    await page.keyboard.press("ArrowLeft");
+    await expect.poll(() => cards(page, "進行中")).toContain("導覽列互動");
+  });
 });
