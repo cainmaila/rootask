@@ -352,3 +352,45 @@ test.describe("Sprint（Milestone）", () => {
     await expect(page.locator("aside.detail").getByLabel("Sprint", { exact: true })).toBeDisabled();
   });
 });
+
+// ---------- 泳道（#86） ----------
+test.describe("泳道", () => {
+  const lane = (page: Page, title: string) => page.locator(".lane", { has: page.locator(".lane-title", { hasText: title }) });
+  const laneCards = (page: Page, title: string, status: string) =>
+    lane(page, title).locator(`[data-col="${status}"] .board-title`).allInnerTexts();
+
+  test("依父任務分泳道：最上層在前、照任務樹順序；重新整理後還記得", async ({ page }) => {
+    await openBoard(page);
+    await page.getByText("只看最底層任務").click();
+    await page.getByText("依父任務分泳道").click();
+    expect(await page.locator(".lane-title").allInnerTexts()).toEqual([
+      expect.stringContaining("最上層"),
+      expect.stringContaining("首頁設計"),
+      expect.stringContaining("後台 API"),
+      expect.stringContaining("行銷活動"),
+    ]);
+    expect(await laneCards(page, "首頁設計", "review")).toEqual(["導覽列互動"]);
+    expect(await laneCards(page, "後台 API", "todo")).toEqual(["文章列表 API", "上傳圖片 API"]);
+    await page.reload();
+    await expect(page.locator(".lane").first()).toBeVisible();
+  });
+
+  test("泳道裡拖到別欄＝改狀態；點泳道標題開父任務", async ({ page, isMobile }) => {
+    test.skip(!!isMobile, "只在桌面");
+    await openBoard(page);
+    await page.getByText("依父任務分泳道").click();
+    await lane(page, "後台 API").scrollIntoViewIfNeeded();
+    const cell = (await lane(page, "後台 API").locator('[data-col="doing"]').boundingBox())!;
+    await mouseDrag(page, "上傳圖片 API", { x: cell.x + cell.width / 2, y: cell.y + cell.height / 2 });
+    await expect.poll(() => laneCards(page, "後台 API", "doing")).toContain("上傳圖片 API");
+    await lane(page, "後台 API").locator(".lane-title").getByRole("button", { name: "後台 API" }).click();
+    await expect(page.locator("aside.detail .title-input")).toHaveValue("後台 API");
+  });
+
+  test("篩選時沒有卡片的泳道不顯示", async ({ page }) => {
+    await openBoard(page);
+    await page.getByText("依父任務分泳道").click();
+    await page.getByLabel("依 Sprint 篩選").selectOption({ label: "Sprint 2" });
+    expect(await page.locator(".lane-title").allInnerTexts()).toEqual([expect.stringContaining("後台 API")]);
+  });
+});

@@ -428,3 +428,19 @@ section.board-area { min-width: 0; }
   border: 1px solid var(--danger); padding: 0 8px; border-radius: 999px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .board-sprint { color: var(--muted); border: 1px solid var(--line); border-radius: 6px; padding: 0 6px; white-space: nowrap; }
+
+/* 泳道（#86）：整個看板一起橫向捲動，每列的格子和最上面的標頭對齊 */
+.board.lanes { display: block; }
+.lane-row { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(240px, 1fr); gap: 10px; align-items: stretch; }
+.lane-heads { position: sticky; top: 0; z-index: 1; padding-bottom: 6px; background: var(--bg); }
+.lane-heads .board-col-head { padding: 4px 8px; }
+.lane { margin-top: 8px; }
+.lane-title {
+  position: sticky; left: 0; display: inline-flex; align-items: center; gap: 8px;
+  font-size: 14px; margin: 6px 0; padding: 0 4px;
+}
+.board-col.lane-cell { min-height: 64px; padding: 6px; }
+@media (max-width: 600px) {
+  .lane-row { grid-auto-columns: 82vw; }
+  .board-col.lane-cell { min-height: 64px; }
+}

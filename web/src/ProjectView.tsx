@@ -8,7 +8,7 @@ import { todayLocal } from "../../shared/meta";
 import { TaskDetail } from "./TaskDetail";
 import { TaskNode, type DragCtx, type TreeView } from "./TaskNode";
 import { Board, type BoardDragCtx } from "./Board";
-import { boardColumns, boardDrop, columnNeighbor, neighborStatus, sameDrop, treeOrder, type BoardDrop } from "../../shared/board";
+import { boardColumns, boardDrop, boardLanes, columnNeighbor, neighborStatus, sameDrop, treeOrder, type BoardDrop } from "../../shared/board";
 import { transitionAllowed } from "./config";
 import type { ProjectViewName } from "./App";
 import { gh } from "./api";
@@ -142,6 +142,23 @@ function takeScroll(owner: string, repo: string): { x: number; y: number } | nul
   }
 }
 
+// 看板的顯示偏好（泳道 #86）存在瀏覽器
+const prefKey = (owner: string, repo: string, name: string) => `rootask:board-${name}:${owner}/${repo}`;
+function readPref(owner: string, repo: string, name: string): boolean {
+  try {
+    return localStorage.getItem(prefKey(owner, repo, name)) === "1";
+  } catch {
+    return false;
+  }
+}
+function writePref(owner: string, repo: string, name: string, on: boolean) {
+  try {
+    localStorage.setItem(prefKey(owner, repo, name), on ? "1" : "0");
+  } catch {
+    /* 存不了不影響使用 */
+  }
+}
+
 // 看板「只看最底層任務」是每位使用者自己的偏好（#82）
 const leavesKey = (owner: string, repo: string) => `rootask:board-leaves:${owner}/${repo}`;
 function readLeaves(owner: string, repo: string): boolean {
@@ -175,6 +192,7 @@ export function ProjectView({
   const [busy, setBusy] = useState(false);
   const [showDone, setShowDone] = useState(() => readShowDone(owner, repo));
   const [leavesOnly, setLeavesOnly] = useState(() => readLeaves(owner, repo));
+  const [byParent, setByParent] = useState(() => readPref(owner, repo, "lanes"));
   const [loadingDone, setLoadingDone] = useState(false);
   const [filter, setFilter] = useState<TaskFilter>(EMPTY_FILTER);
   // 篩選時會自動展開符合任務的上層；使用者在篩選中手動展開／收合的記在這裡，換條件就重來
@@ -770,6 +788,17 @@ export function ProjectView({
                     />
                     只看最底層任務
                   </label>
+                  <label className={`check small chip ${byParent ? "on" : ""}`}>
+                    <input
+                      type="checkbox"
+                      checked={byParent}
+                      onChange={(e) => {
+                        setByParent(e.target.checked);
+                        writePref(owner, repo, "lanes", e.target.checked);
+                      }}
+                    />
+                    依父任務分泳道
+                  </label>
                   {filtering && !showDone && ctx.tree.closedCount > 0 && (
                     <span className="muted small filter-hint">
                       已完成的任務沒有列入搜尋。
@@ -795,6 +824,7 @@ export function ProjectView({
                   drag={boardDrag}
                   boardRef={boardRef}
                   done={{ showDone, closedCount: ctx.tree.closedCount, onShowDone: () => void toggleShowDone() }}
+                  lanes={byParent ? boardLanes(boardColsNow, treeOrder(ctx.tree.children), shownParent) : null}
                 />
               </>
             ) : (

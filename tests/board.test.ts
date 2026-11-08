@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ancestry, boardColumns, boardDrop, columnNeighbor, neighborStatus, sameDrop, treeOrder, type BoardItem } from "../shared/board";
+import { ancestry, boardColumns, boardDrop, boardLanes, columnNeighbor, neighborStatus, sameDrop, treeOrder, type BoardItem } from "../shared/board";
 
 // 1 ─ 4 ─ 6
 //   └ 5
@@ -125,5 +125,17 @@ describe("看板拖曳（#83、#84）", () => {
     expect(neighborStatus(ids, "todo", 1, (_f, t) => t !== "doing")).toEqual({ to: "doing", blocked: true });
     expect(neighborStatus(ids, "todo", -1, all)).toBeNull();
     expect(neighborStatus(ids, "done", 1, all)).toBeNull();
+  });
+});
+
+describe("泳道（#86）", () => {
+  it("依父任務分泳道：最上層在前，其他照任務樹順序；空的泳道不列", () => {
+    const order = treeOrder(children);
+    const cols = boardColumns(["todo", "doing", "done"], order, items, { leavesOnly: true, only: null });
+    const lanes = boardLanes(cols, order, (n) => parents.get(n) ?? null);
+    expect(lanes.map((l) => l.parent)).toEqual([null, 1, 4, 3]);
+    expect(Object.fromEntries(lanes[0].columns)).toEqual({ todo: [2], doing: [], done: [] });
+    expect(Object.fromEntries(lanes[1].columns)).toEqual({ todo: [], doing: [], done: [5] });
+    expect(lanes[2].count).toBe(1);
   });
 });

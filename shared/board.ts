@@ -146,3 +146,44 @@ export function neighborStatus(
   if (to === undefined) return null;
   return { to, blocked: !allowed(from, to) };
 }
+
+// ---------- 泳道（#86） ----------
+
+export interface BoardLane {
+  /** 父任務；null＝最上層（沒有父任務的卡片） */
+  parent: number | null;
+  /** 這條泳道裡，每個狀態欄的卡片（照任務樹順序） */
+  columns: Map<string, number[]>;
+  /** 卡片總數 */
+  count: number;
+}
+
+/**
+ * 依父任務分泳道：每張卡片放進它父任務的那一條。
+ * 泳道照父任務在任務樹的順序排，「最上層」在最前；沒有卡片的泳道不列出。
+ */
+export function boardLanes(
+  columns: Map<string, number[]>,
+  order: number[],
+  parentOf: (n: number) => number | null,
+): BoardLane[] {
+  const lanes = new Map<number | null, BoardLane>();
+  for (const [status, cards] of columns) {
+    for (const n of cards) {
+      const p = parentOf(n);
+      let lane = lanes.get(p);
+      if (!lane) {
+        lane = { parent: p, columns: new Map([...columns.keys()].map((k) => [k, []])), count: 0 };
+        lanes.set(p, lane);
+      }
+      lane.columns.get(status)!.push(n);
+      lane.count++;
+    }
+  }
+  const rank = new Map(order.map((n, i) => [n, i]));
+  return [...lanes.values()].sort((a, b) => {
+    if (a.parent === null) return -1;
+    if (b.parent === null) return 1;
+    return (rank.get(a.parent) ?? Infinity) - (rank.get(b.parent) ?? Infinity);
+  });
+}

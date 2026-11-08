@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import type { ProjectCtx } from "./ProjectView";
 import { isClosing } from "./config";
 import { isOverdue, todayLocal } from "../../shared/meta";
-import { ancestry, type BoardDrop } from "../../shared/board";
+import { ancestry, type BoardDrop, type BoardLane } from "../../shared/board";
 import { useSync } from "./sync";
 
 /** 看板的拖曳狀態，由 ProjectView 提供（#83、#84） */
@@ -39,10 +39,12 @@ interface Props {
   drag: BoardDragCtx;
   boardRef: React.RefObject<HTMLDivElement>;
   done: BoardDoneCtx;
+  /** 依父任務分泳道（#86）；null＝不分 */
+  lanes: BoardLane[] | null;
 }
 
 /** 看板（#43、#82）：欄位＝自訂狀態，卡片＝任務 */
-export function Board({ ctx, columns, selected, select, drag, boardRef, done }: Props) {
+export function Board({ ctx, columns, selected, select, drag, boardRef, done, lanes }: Props) {
   const statuses = ctx.cfg.config.statuses;
   const over = drag.over;
 
@@ -63,47 +65,92 @@ export function Board({ ctx, columns, selected, select, drag, boardRef, done }: 
     },
   };
 
-  return (
-    <div className={`board ${drag.dragging !== null ? "dragging" : ""}`} role="list" aria-label="看板" ref={boardRef}>
-      {statuses.map((s) => {
-        const cards = columns.get(s.id) ?? [];
-        let state = "";
-        if (drag.dragging !== null) {
-          if (over?.kind === "status" && over.status === s.id) state = over.ok ? "drop-target" : "drop-no";
-          else if (!drag.allowed(drag.dragging, s.id)) state = "no-drop";
-        }
-        return (
-          <section
-            key={s.id}
-            className={`board-col cat-${s.category} ${state}`}
-            role="listitem"
-            aria-label={s.name}
-            data-col={s.id}
-          >
-            <header className="board-col-head">
+  /** 一欄（或泳道裡的一格）。withHead：一般看板每欄有標頭；泳道的格子共用最上面那排標頭 */
+  const column = (s: (typeof statuses)[number], cards: number[], withHead: boolean, key: string) => {
+    let state = "";
+    if (drag.dragging !== null) {
+      if (over?.kind === "status" && over.status === s.id) state = over.ok ? "drop-target" : "drop-no";
+      else if (!drag.allowed(drag.dragging, s.id)) state = "no-drop";
+    }
+    return (
+      <section
+        key={key}
+        className={`board-col cat-${s.category} ${state} ${withHead ? "" : "lane-cell"}`}
+        role="listitem"
+        aria-label={s.name}
+        data-col={s.id}
+      >
+        {withHead && (
+          <header className="board-col-head">
+            <span className={`pill cat-${s.category}`}>{s.name}</span>
+            <span className="muted small">{cards.length}</span>
+          </header>
+        )}
+        <ul className="board-cards">
+          {cards.map((n) => (
+            <BoardCard key={n} ctx={ctx} n={n} selected={selected === n} select={select} drag={dragCtx} />
+          ))}
+          {cards.length === 0 &&
+            withHead &&
+            (isClosing(s.category) && !done.showDone && done.closedCount > 0 ? (
+              <li className="board-empty muted small">
+                已完成的任務被隱藏了。
+                <button className="link-btn" onClick={done.onShowDone}>
+                  顯示已完成
+                </button>
+              </li>
+            ) : (
+              <li className="board-empty muted small">沒有任務</li>
+            ))}
+        </ul>
+        {state === "drop-no" && <p className="board-hint small">轉換規則不允許改成「{s.name}」</p>}
+      </section>
+    );
+  };
+
+  const cls = `board ${drag.dragging !== null ? "dragging" : ""} ${lanes ? "lanes" : ""}`;
+
+  if (lanes) {
+    // 泳道（#86）：最上面一排欄位標頭，底下每個父任務一列
+    return (
+      <div className={cls} aria-label="看板" ref={boardRef}>
+        <div className="lane-row lane-heads">
+          {statuses.map((s) => (
+            <header key={s.id} className="board-col-head">
               <span className={`pill cat-${s.category}`}>{s.name}</span>
-              <span className="muted small">{cards.length}</span>
+              <span className="muted small">{columns.get(s.id)?.length ?? 0}</span>
             </header>
-            <ul className="board-cards">
-              {cards.map((n) => (
-                <BoardCard key={n} ctx={ctx} n={n} selected={selected === n} select={select} drag={dragCtx} />
-              ))}
-              {cards.length === 0 &&
-                (isClosing(s.category) && !done.showDone && done.closedCount > 0 ? (
-                  <li className="board-empty muted small">
-                    已完成的任務被隱藏了。
-                    <button className="link-btn" onClick={done.onShowDone}>
-                      顯示已完成
-                    </button>
-                  </li>
+          ))}
+        </div>
+        {lanes.length === 0 && <p className="muted small board-empty">沒有任務</p>}
+        {lanes.map((l) => {
+          const key = l.parent ?? "root";
+          const title = l.parent === null ? "最上層" : (ctx.tree.byNumber.get(l.parent)?.title ?? `#${l.parent}`);
+          return (
+            <section key={key} className="lane" aria-label={`泳道：${title}`} data-lane={key}>
+              <h3 className="lane-title">
+                {l.parent === null ? (
+                  <span>{title}</span>
                 ) : (
-                  <li className="board-empty muted small">沒有任務</li>
-                ))}
-            </ul>
-            {state === "drop-no" && <p className="board-hint small">轉換規則不允許改成「{s.name}」</p>}
-          </section>
-        );
-      })}
+                  <button className="link-btn" onClick={() => select(l.parent!)}>
+                    {title}
+                  </button>
+                )}
+                <span className="muted small">{l.count}</span>
+              </h3>
+              <div className="lane-row" role="list">
+                {statuses.map((s) => column(s, l.columns.get(s.id) ?? [], false, `${key}:${s.id}`))}
+              </div>
+            </section>
+          );
+        })}
+      </div>
+    );
+  }
+
+  return (
+    <div className={cls} role="list" aria-label="看板" ref={boardRef}>
+      {statuses.map((s) => column(s, columns.get(s.id) ?? [], true, s.id))}
     </div>
   );
 }
