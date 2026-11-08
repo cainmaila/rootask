@@ -444,3 +444,8 @@ section.board-area { min-width: 0; }
   .lane-row { grid-auto-columns: 82vw; }
   .board-col.lane-cell { min-height: 64px; }
 }
+/* 泳道：每一列撐滿整個捲動寬度，標題才會一直黏在左邊（#94）；格子內標出狀態 */
+.board.lanes > .lane, .board.lanes > .lane-heads { width: max-content; min-width: 100%; }
+.lane-title { z-index: 1; background: var(--bg); border-radius: 6px; padding: 2px 8px; }
+.lane-cell-label { display: block; padding: 0 2px 4px; font-size: 11px; }
+.board-sprint.ended { border-style: dashed; opacity: 0.8; }

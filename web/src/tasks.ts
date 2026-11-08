@@ -44,6 +44,8 @@ export interface Milestone {
   title: string;
   /** 截止日（ISO），沒有就不帶 */
   dueOn?: string | null;
+  /** 已結束的 Sprint 是 CLOSED（#95） */
+  state?: "OPEN" | "CLOSED";
 }
 
 /** 開著的 milestone（可以排入的 Sprint），依截止日排序 */
@@ -51,7 +53,7 @@ export async function listMilestones(owner: string, repo: string): Promise<Miles
   const r = await gh<{ number: number; title: string; due_on: string | null }[]>(
     `/repos/${owner}/${repo}/milestones?state=open&sort=due_on&direction=asc&per_page=100`,
   );
-  return r.map((m) => ({ number: m.number, title: m.title, dueOn: m.due_on }));
+  return r.map((m) => ({ number: m.number, title: m.title, dueOn: m.due_on, state: "OPEN" as const }));
 }
 
 /** 排入／移出 Sprint：只送 milestone 這個欄位 */
@@ -70,7 +72,7 @@ fragment T on Issue {
   labels(first: 30) { nodes { name } }
   assignees(first: 10) { nodes { login avatarUrl } }
   parent { number }
-  milestone { number title }
+  milestone { number title state }
   subIssues(first: 100) { nodes { number } }
   subIssuesSummary { total completed }
 }`;
@@ -100,7 +102,7 @@ interface IssueNode {
   labels: { nodes: { name: string }[] };
   assignees: { nodes: Person[] };
   parent: { number: number } | null;
-  milestone?: { number: number; title: string } | null;
+  milestone?: { number: number; title: string; state?: "OPEN" | "CLOSED" } | null;
   subIssues: { nodes: { number: number }[] };
   subIssuesSummary: { total: number; completed: number };
 }

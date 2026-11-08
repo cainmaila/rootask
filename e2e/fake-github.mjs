@@ -229,7 +229,7 @@ export class FakeGitHub {
 
   #milestone(r, i) {
     const m = i.milestone ? r.milestones.find((x) => x.number === i.milestone) : null;
-    return m ? { number: m.number, title: m.title } : null;
+    return m ? { number: m.number, title: m.title, state: m.state.toUpperCase() } : null;
   }
 
   #node(r, i) {

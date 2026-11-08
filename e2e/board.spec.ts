@@ -394,3 +394,27 @@ test.describe("泳道", () => {
     expect(await page.locator(".lane-title").allInnerTexts()).toEqual([expect.stringContaining("後台 API")]);
   });
 });
+
+test.describe("看板：QA 回報（#94、#95）", () => {
+  test("#94 泳道往右捲之後，泳道標題還在左邊，格子標出狀態", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 760 });
+    await openBoard(page);
+    await page.getByText("依父任務分泳道").click();
+    await page.locator(".board").evaluate((e) => (e.scrollLeft = 700));
+    await page.waitForTimeout(200);
+    const lane = page.locator(".lane", { has: page.locator(".lane-title", { hasText: "首頁設計" }) });
+    await lane.scrollIntoViewIfNeeded();
+    const t = (await lane.locator(".lane-title").boundingBox())!;
+    expect(t.x).toBeGreaterThanOrEqual(0);
+    expect(t.x).toBeLessThan(60);
+    await expect(lane.locator('[data-col="review"] .lane-cell-label')).toHaveText("待審核");
+  });
+
+  test("#95 排在已結束 Sprint 的卡片標出（已結束）", async ({ page }) => {
+    await page.request.patch("/api/gh/repos/demo/website/issues/9", { data: { milestone: 1 } });
+    await openBoard(page);
+    const tag = card(page, "上傳圖片 API").locator(".board-sprint");
+    await expect(tag).toHaveText("Sprint 0（已結束）");
+    await expect(tag).toHaveClass(/ended/);
+  });
+});

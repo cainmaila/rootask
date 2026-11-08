@@ -80,6 +80,8 @@ export function Board({ ctx, columns, selected, select, drag, boardRef, done, la
         aria-label={s.name}
         data-col={s.id}
       >
+        {/* 泳道的格子也標出狀態：捲到下面、看不到最上面那排標頭時還分得出來（#94） */}
+        {!withHead && <span className="lane-cell-label muted small">{s.name}</span>}
         {withHead && (
           <header className="board-col-head">
             <span className={`pill cat-${s.category}`}>{s.name}</span>
@@ -249,8 +251,12 @@ function BoardCard({
             </span>
           )}
           {task.milestone && (
-            <span className="board-sprint small" title="Sprint">
+            <span
+              className={`board-sprint small ${task.milestone.state === "CLOSED" ? "ended" : ""}`}
+              title={task.milestone.state === "CLOSED" ? "這個 Sprint 已結束" : "Sprint"}
+            >
               {task.milestone.title}
+              {task.milestone.state === "CLOSED" && "（已結束）"}
             </span>
           )}
           {syncing && <span className="spinner" title="同步中" aria-label="同步中" />}

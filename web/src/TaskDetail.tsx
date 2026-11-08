@@ -483,7 +483,7 @@ export function TaskDetail({ n, ctx, close, full = false, expand, open }: Props)
               const v = e.target.value ? Number(e.target.value) : null;
               const m = v === null ? null : (ctx.milestones.find((x) => x.number === v) ?? null);
               void run("排入 Sprint", {
-                optimistic: (t) => patchTask(t, n, { milestone: m && { number: m.number, title: m.title } }),
+                optimistic: (t) => patchTask(t, n, { milestone: m && { number: m.number, title: m.title, state: "OPEN" } }),
                 write: () => setMilestone(owner, repo, n, v),
               });
             }}
