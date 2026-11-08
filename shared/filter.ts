@@ -10,12 +10,14 @@ export interface TaskFilter {
   status: string;
   /** 只看逾期 */
   overdue: boolean;
+  /** Sprint（Milestone，#85）："" 不限、"@none" 未排入、其他為 milestone 編號 */
+  milestone?: string;
 }
 
-export const EMPTY_FILTER: TaskFilter = { text: "", assignee: "", status: "", overdue: false };
+export const EMPTY_FILTER: TaskFilter = { text: "", assignee: "", status: "", overdue: false, milestone: "" };
 
 export function isFilterActive(f: TaskFilter): boolean {
-  return !!(f.text.trim() || f.assignee || f.status || f.overdue);
+  return !!(f.text.trim() || f.assignee || f.status || f.overdue || f.milestone);
 }
 
 /** 篩選需要的任務資料（避免依賴前端的 Task 型別） */
@@ -29,6 +31,8 @@ export interface FilterableTask {
   /** 狀態類別是完成或取消 */
   closed: boolean;
   due?: string;
+  /** 所屬 milestone 編號（#85） */
+  milestone?: number | null;
 }
 
 export interface FilterResult {
@@ -60,6 +64,8 @@ export function matchesFilter(t: FilterableTask, f: TaskFilter, me: string, toda
   if (f.assignee && !f.assignee.startsWith("@") && !t.assignees.some((a) => norm(a) === norm(f.assignee))) return false;
   if (f.status && t.statusId !== f.status) return false;
   if (f.overdue && !(t.due && !t.closed && t.due < today)) return false;
+  if (f.milestone === "@none" && t.milestone) return false;
+  if (f.milestone && f.milestone !== "@none" && t.milestone !== Number(f.milestone)) return false;
   return true;
 }
 

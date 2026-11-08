@@ -20,6 +20,7 @@ import {
   moveTask,
   neighbor,
   setAssignee,
+  setMilestone,
   setStatus,
   statusOf,
   updateBody,
@@ -470,6 +471,37 @@ export function TaskDetail({ n, ctx, close, full = false, expand, open }: Props)
           <span>完成：{actual ? fmtTime(actual.end) : "…"}</span>
         </div>
       </div>
+
+      {(ctx.milestones.length > 0 || task.milestone) && (
+        <label className="field">
+          <span>Sprint</span>
+          <select
+            aria-label="Sprint"
+            value={task.milestone?.number ?? ""}
+            disabled={locked || !can.triage}
+            onChange={(e) => {
+              const v = e.target.value ? Number(e.target.value) : null;
+              const m = v === null ? null : (ctx.milestones.find((x) => x.number === v) ?? null);
+              void run("排入 Sprint", {
+                optimistic: (t) => patchTask(t, n, { milestone: m && { number: m.number, title: m.title } }),
+                write: () => setMilestone(owner, repo, n, v),
+              });
+            }}
+          >
+            <option value="">未排入</option>
+            {/* 已關閉的 Sprint 不在清單裡，但目前排在那裡時照樣顯示 */}
+            {task.milestone && !ctx.milestones.some((m) => m.number === task.milestone!.number) && (
+              <option value={task.milestone.number}>{task.milestone.title}（已結束）</option>
+            )}
+            {ctx.milestones.map((m) => (
+              <option key={m.number} value={m.number}>
+                {m.title}
+                {m.dueOn ? `（${m.dueOn.slice(5, 10).replace("-", "/")} 截止）` : ""}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
 
       <div className="field">
         <span>分配人</span>

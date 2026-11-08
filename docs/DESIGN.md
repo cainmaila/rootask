@@ -101,7 +101,10 @@ GitHub App 權限（第一階段）：Metadata: read、Issues: write、Contents:
   - 隱藏已完成時，完成類欄位寫「已完成的任務被隱藏了」並可直接顯示；搜尋時也提醒（#90）。
   - 從整頁任務回到看板／任務樹，還原捲動位置；手機不自動打開詳情抽屜（#91）。
   - 權限：triage 可以換欄（改狀態），write 以上才能在欄內排序；唯讀沒有手把。
-- 排列與拖曳判斷是純函式 `shared/board.ts`。後續：Sprint（#85）、泳道（#86）。
+- **Sprint＝GitHub Milestone**（#85）：篩選列多一個「Sprint」選單（所有 Sprint／未排入／各個開著的 milestone，依截止日排序），任務樹與看板共用；
+  任務詳情可以排入／移出 Sprint（triage 以上，只送 `milestone` 欄位）；卡片上標出所屬 Sprint。已結束的 milestone 不在選單裡，但已排在那裡的任務照樣顯示「（已結束）」。
+  Milestone 本身（新增、截止日）仍在 GitHub 上管理。
+- 排列與拖曳判斷是純函式 `shared/board.ts`。後續：泳道（#86）。
 
 ### 狀態（2026-11-04）
 

@@ -201,6 +201,11 @@ function BoardCard({
               {task.childCompleted}/{kidTotal}
             </span>
           )}
+          {task.milestone && (
+            <span className="board-sprint small" title="Sprint">
+              {task.milestone.title}
+            </span>
+          )}
           {syncing && <span className="spinner" title="同步中" aria-label="同步中" />}
           <span className="board-people">
             {task.assignees.slice(0, 3).map((a) => (

@@ -1,13 +1,15 @@
 import { useEffect, useRef } from "react";
 import { EMPTY_FILTER, isFilterActive, type TaskFilter } from "../../shared/filter";
 import type { StatusDef } from "./config";
-import type { Person } from "./tasks";
+import type { Milestone, Person } from "./tasks";
 
 interface Props {
   filter: TaskFilter;
   onChange: (f: TaskFilter) => void;
   statuses: StatusDef[];
   people: Person[];
+  /** Sprint（Milestone，#85） */
+  milestones?: Milestone[];
   /** 符合的任務數；沒有篩選時為 null */
   matchCount: number | null;
   /** 「顯示已完成」切換（#46） */
@@ -87,6 +89,22 @@ export function FilterBar(p: Props) {
             </option>
           ))}
         </select>
+        {(p.milestones?.length ?? 0) > 0 && (
+          <select
+            value={f.milestone ?? ""}
+            onChange={(e) => set({ milestone: e.target.value })}
+            aria-label="依 Sprint 篩選"
+            className={f.milestone ? "on" : ""}
+          >
+            <option value="">所有 Sprint</option>
+            <option value="@none">未排入 Sprint</option>
+            {p.milestones!.map((m) => (
+              <option key={m.number} value={String(m.number)}>
+                {m.title}
+              </option>
+            ))}
+          </select>
+        )}
         <label className={`check small chip ${f.overdue ? "on" : ""}`}>
           <input type="checkbox" checked={f.overdue} onChange={(e) => set({ overdue: e.target.checked })} />
           逾期

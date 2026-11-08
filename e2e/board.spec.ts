@@ -312,3 +312,43 @@ test.describe("看板：QA 回報", () => {
     await expect.poll(() => cards(page, "進行中")).toContain("導覽列互動");
   });
 });
+
+// ---------- Sprint（#85） ----------
+test.describe("Sprint（Milestone）", () => {
+  test("看板依 Sprint 篩選；卡片上標出 Sprint", async ({ page }) => {
+    await openBoard(page);
+    await expect(card(page, "Hero 主視覺").locator(".board-sprint")).toHaveText("Sprint 1");
+    await page.getByLabel("依 Sprint 篩選").selectOption({ label: "Sprint 1" });
+    const all = (await page.locator(".board-title").allInnerTexts()).sort();
+    expect(all).toEqual(["Hero 主視覺", "導覽列互動", "文章列表 API"].sort());
+    await page.getByLabel("依 Sprint 篩選").selectOption({ label: "未排入 Sprint" });
+    expect(await page.locator(".board-title").allInnerTexts()).not.toContain("Hero 主視覺");
+    // 已結束的 Sprint 不在選單裡
+    expect(await page.getByLabel("依 Sprint 篩選").locator("option").allInnerTexts()).not.toContain("Sprint 0");
+  });
+
+  test("在任務詳情排入 Sprint：畫面先變，GitHub 上也改了；任務樹也能篩", async ({ page }) => {
+    await openBoard(page);
+    await card(page, "整理專案文件").locator(".board-card-main").click();
+    const panel = page.locator("aside.detail");
+    await panel.getByLabel("Sprint", { exact: true }).selectOption("3");
+    await expect(card(page, "整理專案文件").locator(".board-sprint")).toHaveText("Sprint 2");
+    await expect.poll(async () => {
+      const st = await (await page.request.get("/__state")).json();
+      return (st.repos["demo/website"].issues as { title: string; milestone: number | null }[]).find((i) => i.title === "整理專案文件")!.milestone;
+    }).toBe(3);
+    await panel.getByRole("button", { name: "關閉" }).click();
+    await page.getByRole("button", { name: "任務樹" }).click();
+    await page.getByLabel("依 Sprint 篩選").selectOption({ label: "Sprint 2" });
+    await expect.poll(() => page.locator(".node:not(.context) .node-title").allInnerTexts()).toEqual(
+      expect.arrayContaining(["整理專案文件", "上傳圖片 API"]),
+    );
+  });
+
+  test("唯讀成員不能改 Sprint", async ({ page }) => {
+    await page.request.post("/__as?login=amy&role=read");
+    await openBoard(page);
+    await card(page, "Hero 主視覺").locator(".board-card-main").click();
+    await expect(page.locator("aside.detail").getByLabel("Sprint", { exact: true })).toBeDisabled();
+  });
+});

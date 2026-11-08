@@ -29,6 +29,7 @@ function task(number: number, over: Partial<Task> = {}): Task {
     labels: ["status:todo"],
     assignees: [],
     parent: null,
+    milestone: null,
     childOrder: [],
     childTotal: 0,
     childCompleted: 0,

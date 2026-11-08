@@ -28,12 +28,35 @@ export interface Task {
   labels: string[];
   assignees: Person[];
   parent: number | null;
+  /** Sprint（#85） */
+  milestone: Milestone | null;
   /** GitHub 原生的子任務順序 */
   childOrder: number[];
   /** 子任務總數與已完成數（GitHub 統計，包含沒有載入的已關閉子任務） */
   childTotal: number;
   childCompleted: number;
   updatedAt: string;
+}
+
+/** Sprint＝GitHub Milestone（#85） */
+export interface Milestone {
+  number: number;
+  title: string;
+  /** 截止日（ISO），沒有就不帶 */
+  dueOn?: string | null;
+}
+
+/** 開著的 milestone（可以排入的 Sprint），依截止日排序 */
+export async function listMilestones(owner: string, repo: string): Promise<Milestone[]> {
+  const r = await gh<{ number: number; title: string; due_on: string | null }[]>(
+    `/repos/${owner}/${repo}/milestones?state=open&sort=due_on&direction=asc&per_page=100`,
+  );
+  return r.map((m) => ({ number: m.number, title: m.title, dueOn: m.due_on }));
+}
+
+/** 排入／移出 Sprint：只送 milestone 這個欄位 */
+export async function setMilestone(owner: string, repo: string, n: number, milestone: number | null): Promise<void> {
+  await gh(`/repos/${owner}/${repo}/issues/${n}`, { method: "PATCH", json: { milestone } });
 }
 
 export interface TaskTree {
@@ -47,6 +70,7 @@ fragment T on Issue {
   labels(first: 30) { nodes { name } }
   assignees(first: 10) { nodes { login avatarUrl } }
   parent { number }
+  milestone { number title }
   subIssues(first: 100) { nodes { number } }
   subIssuesSummary { total completed }
 }`;
@@ -76,6 +100,7 @@ interface IssueNode {
   labels: { nodes: { name: string }[] };
   assignees: { nodes: Person[] };
   parent: { number: number } | null;
+  milestone?: { number: number; title: string } | null;
   subIssues: { nodes: { number: number }[] };
   subIssuesSummary: { total: number; completed: number };
 }
@@ -102,6 +127,7 @@ function toTask(n: IssueNode): Task {
     labels: n.labels.nodes.map((l) => l.name),
     assignees: n.assignees.nodes,
     parent: n.parent?.number ?? null,
+    milestone: n.milestone ?? null,
     childOrder: n.subIssues.nodes.map((c) => c.number),
     childTotal: n.subIssuesSummary.total,
     childCompleted: n.subIssuesSummary.completed,

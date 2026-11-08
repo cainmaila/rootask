@@ -31,6 +31,8 @@ import {
   loadTree,
   moveBlockReason,
   myPermission,
+  listMilestones,
+  type Milestone,
   abilitiesOf,
   neighbor,
   planReorder,
@@ -51,6 +53,8 @@ export interface ProjectCtx {
   cfg: LoadedConfig;
   tree: LoadedTree;
   people: Person[];
+  /** 開著的 Sprint（Milestone，#85） */
+  milestones: Milestone[];
   permission: string;
   /** 目前登入者的 GitHub 帳號 */
   me: string;
@@ -210,15 +214,16 @@ export function ProjectView({
   /** 全部重新讀取：進入專案、回到畫面、改了設定 */
   const reload = useCallback(async () => {
     try {
-      const [cfg, tree, people, permission, user] = await Promise.all([
+      const [cfg, tree, people, permission, user, milestones] = await Promise.all([
         loadConfig(owner, repo),
         loadTasks(),
         listAssignable(owner, repo),
         myPermission(owner, repo),
         gh<{ login: string }>("/user"),
+        listMilestones(owner, repo).catch(() => [] as Milestone[]),
       ]);
       base.current = tree;
-      setCtx((c) => ({ owner, repo, cfg, tree: c?.tree ?? tree, people, permission, me: user.login }));
+      setCtx((c) => ({ owner, repo, cfg, tree: c?.tree ?? tree, people, permission, me: user.login, milestones }));
       render();
       setError(null);
     } catch (e) {
@@ -563,6 +568,7 @@ export function ProjectView({
             statusId: st.id,
             closed: isClosing(st.category),
             due: t.meta.due,
+            milestone: t.milestone?.number ?? null,
           };
         }),
         filter,
@@ -739,6 +745,7 @@ export function ProjectView({
               onChange={setFilter}
               statuses={ctx.cfg.config.statuses}
               people={ctx.people}
+              milestones={ctx.milestones}
               matchCount={result ? result.matches.size : null}
               showDone={showDone}
               closedCount={ctx.tree.closedCount}

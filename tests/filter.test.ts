@@ -76,3 +76,19 @@ describe("搜尋與篩選（#47）", () => {
     expect(sorted(r.visible)).toEqual([1, 2]);
   });
 });
+
+describe("Sprint 篩選（#85）", () => {
+  const ms = [
+    t(1, "A", { milestone: 2 }),
+    t(2, "B", { milestone: 3 }),
+    t(3, "C", { milestone: null }),
+    t(4, "D"),
+  ];
+  const go = (milestone: string) => filterTasks(ms, { ...EMPTY_FILTER, milestone }, "cain", "2026-11-07").matches;
+  it("指定 Sprint、未排入", () => {
+    expect([...go("2")]).toEqual([1]);
+    expect([...go("@none")].sort()).toEqual([3, 4]);
+    expect(isFilterActive({ ...EMPTY_FILTER, milestone: "2" })).toBe(true);
+    expect(isFilterActive(EMPTY_FILTER)).toBe(false);
+  });
+});

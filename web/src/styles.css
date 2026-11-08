@@ -427,3 +427,4 @@ section.board-area { min-width: 0; }
   font-size: 12px; line-height: 18px; color: var(--danger); background: var(--surface);
   border: 1px solid var(--danger); padding: 0 8px; border-radius: 999px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+.board-sprint { color: var(--muted); border: 1px solid var(--line); border-radius: 6px; padding: 0 6px; white-space: nowrap; }

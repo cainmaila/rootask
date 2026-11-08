@@ -83,6 +83,7 @@ export class FakeGitHub {
       labels: new Set(),
       issues: new Map(),
       children: new Map(), // parent number -> number[]（原生子任務順序）
+      milestones: [], // Sprint（#85）
       nextNumber: 1,
     };
     this.repos.set(`${owner}/${name}`.toLowerCase(), r);
@@ -102,6 +103,12 @@ export class FakeGitHub {
     );
     for (const s of DEFAULT_STATUSES) r.labels.add(`status:${s.id}`);
     const add = (title, o = {}) => this.#create(r, { title, ...o }, { silent: true });
+    // Sprint＝Milestone（#85）
+    r.milestones = [
+      { number: 1, title: "Sprint 0", state: "closed", due_on: iso(Date.now() - 7 * DAY), description: "" },
+      { number: 2, title: "Sprint 1", state: "open", due_on: iso(Date.now() + 7 * DAY), description: "首頁改版" },
+      { number: 3, title: "Sprint 2", state: "open", due_on: iso(Date.now() + 21 * DAY), description: "" },
+    ];
 
     const site = add("官網改版", { status: "doing", body: "## 目標\n- [x] 確認需求\n- [ ] 上線新版首頁\n\n**負責人**：cain" });
     const design = add("首頁設計", { parent: site, status: "doing", who: ["cain"], due: dateOnly(-3), start: dateOnly(-10) });
@@ -110,14 +117,15 @@ export class FakeGitHub {
       status: "todo",
       who: ["amy"],
       due: dateOnly(4),
+      milestone: 2,
       body: "需要 SVG 與 PNG 兩種版本。\n\n參考圖：\n![參考](https://github.com/demo/website/blob/taskapp-assets/attachments/3/ref.png)",
     });
-    add("導覽列互動", { parent: design, status: "review", who: ["ben"] });
+    add("導覽列互動", { parent: design, status: "review", who: ["ben"], milestone: 2 });
     add("字體與色票", { parent: design, status: "done", closed: true });
     const api = add("後台 API", { parent: site, status: "doing", who: ["ben"], due: dateOnly(10) });
     add("登入流程", { parent: api, status: "done", closed: true, who: ["ben"] });
-    add("文章列表 API", { parent: api, status: "todo", who: ["ben"], due: dateOnly(-1) });
-    add("上傳圖片 API", { parent: api, status: "todo" });
+    add("文章列表 API", { parent: api, status: "todo", who: ["ben"], due: dateOnly(-1), milestone: 2 });
+    add("上傳圖片 API", { parent: api, status: "todo", milestone: 3 });
     const mkt = add("行銷活動", { status: "todo", who: ["amy"], due: dateOnly(20) });
     add("社群貼文排程", { parent: mkt, status: "todo", who: ["amy"] });
     add("電子報文案", { parent: mkt, status: "dropped", closed: true, reason: "not_planned" });
@@ -167,6 +175,7 @@ export class FakeGitHub {
       updated_at: iso(created),
       labels,
       assignees: o.who ?? [],
+      milestone: o.milestone ?? null,
       parent: null,
       comments: [],
       events: labels.map((name) => ({
@@ -218,6 +227,11 @@ export class FakeGitHub {
 
   // ---------- 輸出格式 ----------
 
+  #milestone(r, i) {
+    const m = i.milestone ? r.milestones.find((x) => x.number === i.milestone) : null;
+    return m ? { number: m.number, title: m.title } : null;
+  }
+
   #node(r, i) {
     const kids = r.children.get(i.number) ?? [];
     return {
@@ -233,6 +247,7 @@ export class FakeGitHub {
       labels: { nodes: i.labels.map((name) => ({ name })) },
       assignees: { nodes: i.assignees.map((login) => ({ login, avatarUrl: avatar(login) })) },
       parent: i.parent ? { number: i.parent } : null,
+      milestone: this.#milestone(r, i),
       subIssues: { nodes: kids.map((number) => ({ number })) },
       subIssuesSummary: {
         total: kids.length,
@@ -377,6 +392,11 @@ export class FakeGitHub {
         return { status: 200, json: { content: { sha: r.configSha } } };
       }
     }
+    if (rest === "/milestones" && method === "GET") {
+      const state = query.get("state") ?? "open";
+      const list = r.milestones.filter((m) => state === "all" || m.state === state);
+      return { status: 200, json: list.map((m) => ({ ...m, id: 7000 + m.number })) };
+    }
     if (rest === "/issues/events" && method === "GET") {
       // repo 的 issue 事件（新的在前），支援 ETag（#49：偵測別人換父任務）
       const per = Math.min(Number(query.get("per_page") ?? 30), 100);
@@ -434,6 +454,12 @@ export class FakeGitHub {
           issue.title = b.title;
         }
         if (b.body !== undefined) issue.body = b.body;
+        if (b.milestone !== undefined) {
+          // triage 以上可以設定 milestone（#85）
+          if (b.milestone !== null && !r.milestones.some((m) => m.number === b.milestone))
+            return { status: 422, json: { message: "找不到這個 milestone" } };
+          issue.milestone = b.milestone;
+        }
         if (b.assignees !== undefined) {
           if (b.assignees.length > 10) return { status: 422, json: { message: "最多 10 位分配人" } };
           issue.assignees = b.assignees;
